@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from typing import Union, List, Dict
 
+import requests
 import backoff
 import singer
 import sys
@@ -37,7 +38,6 @@ def validate_config(config):
     required_config_keys = [
         'account',
         'dbname',
-        'user',
         'warehouse',
         'tables'
     ]
@@ -49,7 +49,8 @@ def validate_config(config):
 
     possible_authentication_keys =  [
       'password',
-      'private_key_path'
+      'private_key_path',
+      'access_token'
     ]
     if not any(config.get(k, None) for k in possible_authentication_keys):
         errors.append(
@@ -112,10 +113,46 @@ class SnowflakeConnection:
             # Use insecure mode to avoid "Failed to get OCSP response" warnings
             # insecure_mode=True
         )
+    
+    def refresh_token(self):
+        """Connect to snowflake database"""
+
+        payload = {
+            "client_id": f'{self.connection_config["client_id"]}',
+            "redirect_uri": self.connection_config["redirect_uri"],
+            "refresh_token": self.connection_config["refresh_token"],
+            "grant_type": "refresh_token",
+        }
+        url = f"https://{self.connection_config['account']}.snowflakecomputing.com/oauth/token-request"
+        auth = requests.auth.HTTPBasicAuth(self.connection_config["client_id"], self.connection_config["client_secret"])
+        token_response = requests.post(url, data=payload, auth=auth)
+        self.connection_config['access_token'] = token_response.json().get('access_token')
+
+    def open_connection_oauth(self):
+        """Connect to snowflake database"""
+        try:
+            return snowflake.connector.connect(
+                user=self.connection_config['username'],
+                account=self.connection_config['account'],
+                authenticator="oauth",
+                token=self.connection_config['access_token'],
+                warehouse=self.connection_config['warehouse'],
+                database=self.connection_config['dbname'],
+                insecure_mode=self.connection_config.get('insecure_mode', False)
+                # Use insecure mode to avoid "Failed to get OCSP response" warnings
+                # insecure_mode=True
+            )
+        except snowflake.connector.errors.DatabaseError as e:
+            if "OAuth access token expired" in str(e):
+                self.refresh_token()
+            return self.open_connection_oauth()
+
 
     @retry_pattern()
     def connect_with_backoff(self):
         """Connect to snowflake database and retry automatically a few times if fails"""
+        if self.connection_config.get('access_token'):
+            return self.open_connection_oauth()
         return self.open_connection()
 
     def query(self, query: Union[List[str], str], params: Dict = None, max_records=0):
