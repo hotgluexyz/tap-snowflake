@@ -132,7 +132,7 @@ class SnowflakeConnection:
         """Connect to snowflake database"""
         try:
             return snowflake.connector.connect(
-                user=self.connection_config['username'],
+                user=self.connection_config['user'],
                 account=self.connection_config['account'],
                 authenticator="oauth",
                 token=self.connection_config['access_token'],
