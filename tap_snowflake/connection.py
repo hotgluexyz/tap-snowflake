@@ -118,7 +118,6 @@ class SnowflakeConnection:
         """Connect to snowflake database"""
         payload = {
             "client_id": f'{self.connection_config["client_id"]}',
-            "redirect_uri": self.connection_config["redirect_uri"],
             "refresh_token": self.connection_config["refresh_token"],
             "grant_type": "refresh_token",
         }
