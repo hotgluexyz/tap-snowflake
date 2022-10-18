@@ -129,10 +129,8 @@ class SnowflakeConnection:
             raise ConnectionError(token_response["message"])
         self.connection_config['access_token'] = token_response.get('access_token')
 
-    def open_connection_oauth(self):
-        """Connect to snowflake database"""
-        try:
-            connector = dict(
+    def get_conn_creds(self):
+        return dict(
                 account=self.connection_config['account'],
                 authenticator="oauth",
                 token=self.connection_config['access_token'],
@@ -140,10 +138,17 @@ class SnowflakeConnection:
                 database=self.connection_config['dbname'],
                 insecure_mode=self.connection_config.get('insecure_mode', False)
             )
+
+    def open_connection_oauth(self):
+        """Connect to snowflake database"""
+        try:
+            connector = self.get_conn_creds()
             return snowflake.connector.connect(**connector)
         except snowflake.connector.errors.DatabaseError as e:
             if "OAuth access token expired" in str(e):
+                LOGGER.info("Access token expired, attempting to refresh.")
                 self.refresh_token()
+            connector = self.get_conn_creds()
             return snowflake.connector.connect(**connector)
 
 
