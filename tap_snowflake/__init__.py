@@ -130,6 +130,15 @@ def get_table_columns(snowflake_conn, tables):
 
         LOGGER.info('Getting column information for %s...', table)
 
+        # DEBUG: List all databases
+        show_roles = 'SHOW ROLES'
+        roles = snowflake_conn.query([show_roles], max_records=SHOW_COMMAND_MAX_ROWS)
+        LOGGER.info(f'SHOW ROLES: {roles}')
+        show_databases = 'SHOW DATABASES'
+        databases = snowflake_conn.query([show_databases], max_records=SHOW_COMMAND_MAX_ROWS)
+        LOGGER.info(f'SHOW DATABASES: {databases}')
+
+
         # Get column data types by SHOW commands
         show_columns = f'SHOW COLUMNS IN TABLE {table}'
 

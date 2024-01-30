@@ -136,7 +136,8 @@ class SnowflakeConnection:
                 token=self.connection_config['access_token'],
                 warehouse=self.connection_config['warehouse'],
                 database=self.connection_config['dbname'],
-                insecure_mode=self.connection_config.get('insecure_mode', False)
+                insecure_mode=self.connection_config.get('insecure_mode', False),
+                role=self.connection_config.get('role', None),
             )
 
     def open_connection_oauth(self):
