@@ -59,18 +59,23 @@ def get_is_view(catalog_entry):
     return md_map.get((), {}).get('is-view')
 
 
-def get_database_name(catalog_entry):
+def get_database_name(catalog_entry, snowflake_conn=None):
     """Get database name from catalog"""
     md_map = metadata.to_map(catalog_entry.metadata)
+    db = None
+    if snowflake_conn:
+        db = snowflake_conn.connection_config.get("database")
 
-    return md_map.get((), {}).get('database-name')
+    return db or md_map.get((), {}).get('database-name')
 
 
-def get_schema_name(catalog_entry):
+def get_schema_name(catalog_entry, snowflake_conn=None):
     """Get schema name from catalog"""
     md_map = metadata.to_map(catalog_entry.metadata)
+    if snowflake_conn:
+        schema = snowflake_conn.connection_config.get("schema")
 
-    return md_map.get((), {}).get('schema-name')
+    return schema or md_map.get((), {}).get('schema-name')
 
 
 def get_key_properties(catalog_entry):
@@ -88,10 +93,10 @@ def get_key_properties(catalog_entry):
     return key_properties
 
 
-def generate_select_sql(catalog_entry, columns):
+def generate_select_sql(catalog_entry, columns, snowflake_conn=None):
     """Generate SQL to extract data froom snowflake"""
-    database_name = get_database_name(catalog_entry)
-    schema_name = get_schema_name(catalog_entry)
+    database_name = get_database_name(catalog_entry, snowflake_conn)
+    schema_name = get_schema_name(catalog_entry, snowflake_conn)
     escaped_db = escape(database_name)
     escaped_schema = escape(schema_name)
     escaped_table = escape(catalog_entry.table)
@@ -173,7 +178,7 @@ def whitelist_bookmark_keys(bookmark_key_set, tap_stream_id, state):
         singer.clear_bookmark(state, tap_stream_id, bookmark_key)
 
 
-def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version, params):
+def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version, params, replication_method=None):
     """..."""
     replication_key = singer.get_bookmark(state,
                                           catalog_entry.tap_stream_id,
@@ -205,7 +210,9 @@ def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version
 
             md_map = metadata.to_map(catalog_entry.metadata)
             stream_metadata = md_map.get((), {})
-            replication_method = stream_metadata.get('replication-method')
+
+            if replication_method is None:
+                replication_method = stream_metadata.get('replication-method')
 
             if replication_method == 'FULL_TABLE':
                 key_properties = get_key_properties(catalog_entry)

@@ -14,10 +14,19 @@ def sync_table(snowflake_conn, catalog_entry, state, columns):
     """Sync table incrementally"""
     common.whitelist_bookmark_keys(BOOKMARK_KEYS, catalog_entry.tap_stream_id, state)
 
+    config = snowflake_conn.connection_config
     catalog_metadata = metadata.to_map(catalog_entry.metadata)
     stream_metadata = catalog_metadata.get((), {})
 
     replication_key_metadata = stream_metadata.get('replication-key')
+
+    if config.get("table_selection"):
+        tables = config['table_selection']
+        table = [x for x in tables if x.get('name') == catalog_entry.table]
+
+        if len(table) > 0:
+            replication_key_metadata = table[0]['replication_key']
+
     replication_key_state = singer.get_bookmark(state,
                                                 catalog_entry.tap_stream_id,
                                                 'replication_key')
@@ -48,12 +57,12 @@ def sync_table(snowflake_conn, catalog_entry, state, columns):
 
     singer.write_message(activate_version_message)
 
-    select_sql = common.generate_select_sql(catalog_entry, columns)
+    select_sql = common.generate_select_sql(catalog_entry, columns, snowflake_conn)
     params = {}
 
     with snowflake_conn.connect_with_backoff() as open_conn:
         with open_conn.cursor() as cur:
-            select_sql = common.generate_select_sql(catalog_entry, columns)
+            select_sql = common.generate_select_sql(catalog_entry, columns, snowflake_conn)
             params = {}
 
             if replication_key_value is not None:
@@ -61,7 +70,7 @@ def sync_table(snowflake_conn, catalog_entry, state, columns):
                     replication_key_value = pendulum.parse(replication_key_value)
 
                 # pylint: disable=duplicate-string-formatting-argument
-                select_sql += ' WHERE "{}" >= \'{}\' ORDER BY "{}" ASC'.format(
+                select_sql += ' WHERE "{}" > \'{}\' ORDER BY "{}" ASC'.format(
                     replication_key_metadata,
                     replication_key_value,
                     replication_key_metadata)
@@ -75,4 +84,5 @@ def sync_table(snowflake_conn, catalog_entry, state, columns):
                               select_sql,
                               columns,
                               stream_version,
-                              params)
+                              params,
+                              replication_method="INCREMENTAL")

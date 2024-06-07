@@ -46,7 +46,7 @@ REQUIRED_CONFIG_KEYS = [
     'account',
     'dbname',
     'warehouse',
-    'tables'
+    # 'tables'
 ]
 
 # Snowflake data types
@@ -178,7 +178,16 @@ def get_table_columns(snowflake_conn, tables):
 
 def discover_catalog(snowflake_conn, config):
     """Returns a Catalog describing the structure of the database."""
-    tables = config.get('tables').split(',')
+    tables = None
+    if config.get('tables'):
+        tables = config.get('tables').split(',')
+    elif config.get('table_selection'):
+        dbname = config.get('dbname')
+        schema = config.get('schema')
+        tables = config.get('table_selection')
+        # we need to build it up database.schema.table
+        tables = [f"{dbname}.{schema}.{t.get('name')}" for t in tables]
+
     sql_columns = get_table_columns(snowflake_conn, tables)
 
     table_info = {}
@@ -407,6 +416,14 @@ def do_sync_incremental(snowflake_conn, catalog_entry, state, columns):
     md_map = metadata.to_map(catalog_entry.metadata)
     replication_key = md_map.get((), {}).get('replication-key')
 
+    config = snowflake_conn.connection_config
+    if config.get("table_selection"):
+        tables = config['table_selection']
+        table = [x for x in tables if x.get('name') == catalog_entry.table]
+
+        if len(table) > 0:
+            replication_key = table[0]['replication_key']
+
     if not replication_key:
         raise Exception(f'Cannot use INCREMENTAL replication for table ({catalog_entry.stream}) without a replication '
                         f'key.')
@@ -454,10 +471,10 @@ def sync_streams(snowflake_conn, catalog, state):
 
         md_map = metadata.to_map(catalog_entry.metadata)
 
-        replication_method = md_map.get((), {}).get('replication-method')
+        replication_method = snowflake_conn.connection_config.get("replication_method") or md_map.get((), {}).get('replication-method')
 
-        database_name = common.get_database_name(catalog_entry)
-        schema_name = common.get_schema_name(catalog_entry)
+        database_name = common.get_database_name(catalog_entry, snowflake_conn)
+        schema_name = common.get_schema_name(catalog_entry, snowflake_conn)
 
         with metrics.job_timer('sync_table') as timer:
             timer.tags['database'] = database_name

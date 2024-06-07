@@ -39,7 +39,7 @@ def validate_config(config):
         'account',
         'dbname',
         'warehouse',
-        'tables'
+        # 'tables'
     ]
 
     # Check if mandatory keys exist
