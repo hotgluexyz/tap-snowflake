@@ -78,10 +78,19 @@ def get_schema_name(catalog_entry, snowflake_conn=None):
     return schema or md_map.get((), {}).get('schema-name')
 
 
-def get_key_properties(catalog_entry):
+def get_key_properties(catalog_entry, snowflake_conn=None):
     """Get key properties from catalog"""
     catalog_metadata = metadata.to_map(catalog_entry.metadata)
     stream_metadata = catalog_metadata.get((), {})
+    if snowflake_conn:
+        config = snowflake_conn.connection_config
+        tables = config['table_selection']
+        table = [x for x in tables if x.get('name') == catalog_entry.table]
+
+        if len(table) > 0:
+            primary_key = table[0].get('primary_key')
+            if primary_key is not None:
+                return [primary_key]
 
     is_view = get_is_view(catalog_entry)
 

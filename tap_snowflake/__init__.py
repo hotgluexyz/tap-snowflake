@@ -399,8 +399,8 @@ def get_streams(snowflake_conn, catalog, config, state):
     return resolve_catalog(discovered, streams_to_sync)
 
 
-def write_schema_message(catalog_entry, bookmark_properties=None):
-    key_properties = common.get_key_properties(catalog_entry)
+def write_schema_message(catalog_entry, bookmark_properties=None, snowflake_conn=None):
+    key_properties = common.get_key_properties(catalog_entry, snowflake_conn)
 
     singer.write_message(singer.SchemaMessage(
         stream=catalog_entry.stream,
@@ -429,7 +429,8 @@ def do_sync_incremental(snowflake_conn, catalog_entry, state, columns):
                         f'key.')
 
     write_schema_message(catalog_entry=catalog_entry,
-                         bookmark_properties=[replication_key])
+                         bookmark_properties=[replication_key],
+                         snowflake_conn=snowflake_conn)
 
     incremental.sync_table(snowflake_conn, catalog_entry, state, columns)
 
@@ -439,7 +440,7 @@ def do_sync_incremental(snowflake_conn, catalog_entry, state, columns):
 def do_sync_full_table(snowflake_conn, catalog_entry, state, columns):
     LOGGER.info('Stream %s is using full table replication', catalog_entry.stream)
 
-    write_schema_message(catalog_entry)
+    write_schema_message(catalog_entry, snowflake_conn=snowflake_conn)
 
     stream_version = common.get_stream_version(catalog_entry.tap_stream_id, state)
 
