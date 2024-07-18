@@ -483,7 +483,7 @@ def sync_streams(snowflake_conn, catalog, state):
 
             LOGGER.info('Beginning to sync %s.%s.%s', database_name, schema_name, catalog_entry.table)
 
-            if replication_method == 'INCREMENTAL':
+            if replication_method.lower() == 'incremental':
                 do_sync_incremental(snowflake_conn, catalog_entry, state, columns)
             else:
                 do_sync_full_table(snowflake_conn, catalog_entry, state, columns)
