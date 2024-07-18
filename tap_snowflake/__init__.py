@@ -243,12 +243,31 @@ def discover_catalog(snowflake_conn, config):
             md_map = metadata.write(md_map, (), 'row-count', row_count)
             md_map = metadata.write(md_map, (), 'is-view', is_view)
 
+            # get pk and rep_key for tables
+            replication_key = None
+            key_properties = None
+            replication_method = "FULL_TABLE"
+            table_config_data = [table for table in config.get("table_selection", []) if table.get("name") == table_name]
+            if table_config_data:
+                table_config_data = table_config_data[0]
+                replication_key = table_config_data.get("replication_key")
+                if replication_key:
+                    replication_method = "INCREMENTAL"
+                key_properties = table_config_data.get("primary_key")
+                if key_properties and isinstance(key_properties, str):
+                    key_properties = [key_properties]
+            else:
+                LOGGER.info(f"No config data found for table {table_name}, primary key and replication key not set.")
+
             entry = CatalogEntry(
                 table=table_name,
                 stream=table_name,
                 metadata=metadata.to_list(md_map),
                 tap_stream_id=common.generate_tap_stream_id(table_catalog, table_schema, table_name),
-                schema=schema)
+                schema=schema,
+                replication_key=replication_key,
+                key_properties=key_properties,
+                replication_method=replication_method)
 
             entries.append(entry)
 
