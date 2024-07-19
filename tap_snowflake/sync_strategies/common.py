@@ -206,7 +206,7 @@ def clean_rep_key_value(rep_key_value):
     try:
         parse(cleaned_timestamp_str)
     except Exception as e:
-        raise Exception(f"Failed while trying to parse rep_key_valye {rep_key_value}, error: {e}")
+        raise Exception(f"Failed while trying to parse rep_key_value {rep_key_value}, error: {e}")
 
     return cleaned_timestamp_str
 
