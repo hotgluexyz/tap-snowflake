@@ -5,10 +5,12 @@ import copy
 import datetime
 import singer
 import time
+import re
 
 import singer.metrics as metrics
 from singer import metadata
 from singer import utils
+from pendulum import parse
 
 LOGGER = singer.get_logger('tap_snowflake')
 
@@ -187,6 +189,28 @@ def whitelist_bookmark_keys(bookmark_key_set, tap_stream_id, state):
         singer.clear_bookmark(state, tap_stream_id, bookmark_key)
 
 
+def clean_rep_key_value(rep_key_value):
+    match = re.match(r'^(.*?)([\+\-]\d{2}:\d{2})([\+\-].*)?$', rep_key_value)
+
+    if match:
+        # If 2 or more timezones extract the first timezone
+        datetime_part = match.group(1)
+        first_timezone = match.group(2)
+
+        # Reconstruct the datetime string with the first timezone offset
+        cleaned_timestamp_str = datetime_part + first_timezone
+    else:
+        cleaned_timestamp_str = rep_key_value
+    
+    # check if rep_key_value is a valid datetime
+    try:
+        parse(cleaned_timestamp_str)
+    except Exception as e:
+        raise Exception(f"Failed while trying to parse rep_key_valye {rep_key_value}, error: {e}")
+
+    return cleaned_timestamp_str
+
+
 def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version, params, replication_method=None):
     """..."""
     replication_key = singer.get_bookmark(state,
@@ -246,10 +270,13 @@ def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version
                                                   'replication_key',
                                                   replication_key)
 
+                    rep_key_value = clean_rep_key_value(record_message.record[replication_key])
+
+
                     state = singer.write_bookmark(state,
                                                   catalog_entry.tap_stream_id,
                                                   'replication_key_value',
-                                                  record_message.record[replication_key])
+                                                  rep_key_value)
             if rows_saved % 1000 == 0:
                 singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
 
