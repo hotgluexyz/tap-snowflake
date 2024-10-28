@@ -182,11 +182,11 @@ def discover_catalog(snowflake_conn, config):
     if config.get('tables'):
         tables = config.get('tables').split(',')
     elif config.get('table_selection'):
-        dbname = config.get('dbname')
-        schema = config.get('schema')
+        dbname = common.escape(config.get('dbname'))
+        schema = common.escape(config.get('schema'))
         tables = config.get('table_selection')
         # we need to build it up database.schema.table
-        tables = [f"{dbname}.{schema}.{t.get('name')}" for t in tables]
+        tables = [f"{dbname}.{schema}.{common.escape(t.get('name'))}" for t in tables]
 
     sql_columns = get_table_columns(snowflake_conn, tables)
 
