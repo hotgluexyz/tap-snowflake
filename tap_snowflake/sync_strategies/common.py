@@ -293,7 +293,7 @@ def get_custom_sql(config, table_name):
             break
     return custom_sql
 
-def clean_columns(columns: list[str], tables: list[str]):
+def clean_columns(columns, tables):
     # if there is alias for tables an
     for idx, column in enumerate(columns):
         for table in tables:

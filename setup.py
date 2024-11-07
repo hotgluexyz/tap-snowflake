@@ -24,6 +24,7 @@ setup(name='pipelinewise-tap-snowflake',
             'pipelinewise-singer-python==1.*',
             'requests==2.22.0',
             'snowflake-connector-python~=2.0.4',
+            'sql_metadata==2.8.0',
             'pendulum==1.2.0'
       ],
       extras_require={
