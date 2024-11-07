@@ -8,8 +8,8 @@ import time
 import re
 
 import singer.metrics as metrics
-from singer import metadata
-from singer import utils
+from singer import metadata, utils
+from sql_metadata import Parser
 from pendulum import parse
 
 LOGGER = singer.get_logger('tap_snowflake')
@@ -19,7 +19,7 @@ def escape(string):
     if '"' in string:
         raise Exception("Can't escape identifier {} because it contains a backtick"
                         .format(string))
-    return '"{}"'.format(string)
+    return '{}'.format(string)
 
 
 def generate_tap_stream_id(catalog_name, schema_name, table_name):
@@ -283,3 +283,63 @@ def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version
             row = cursor.fetchone()
 
     singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
+
+def get_custom_sql(config, table_name):
+    custom_sql = None
+    for table in config.get("table_selection", []):
+        if table.get("name") and table.get("name").lower() == table_name.lower():
+            if table.get("query"):
+                custom_sql = table.get("query")
+            break
+    return custom_sql
+
+def clean_columns(columns: list[str], tables: list[str]):
+    # if there is alias for tables an
+    for idx, column in enumerate(columns):
+        for table in tables:
+            if table in column:
+                columns[idx] = column.replace(f"{table}.", "")
+
+def extract_sql_components(sql):
+    parsed = Parser(sql)
+    columns = parsed.columns
+    databases, schemas = set(), set()
+    tables = parsed.tables
+    for table in tables:
+        if '.' in table:  # check for database and schema names
+            parts = table.split('.')
+            if len(parts) == 3:
+                databases.add(parts[0])
+                schemas.add(parts[1])
+    clean_columns(columns, tables)
+    return databases, schemas, tables, columns
+
+def validate_sql(sql, stored_database, stored_schema, stored_tables, stored_columns):
+    databases, schemas, tables, columns = extract_sql_components(sql)
+
+    errors = []
+    if len(databases) != 1:
+        errors.append(f"Should be only 1 database. Database found: {databases}")
+    elif stored_database not in databases:
+        errors.append(f"Database mismatch: database {databases} is not {stored_database}")
+    if len(schemas) != 1:
+        errors.append(f"Should be only 1 schema. Schema found: {schemas}")
+    elif stored_schema not in schemas:
+        errors.append(f"Schema mismatch: schema {schemas} is not {stored_schema}")
+    for table in tables:
+        if table not in stored_tables:
+            errors.append(f"Table mismatch: table {table} not in {stored_tables}")
+    for column in columns:
+        if column not in stored_columns:
+            errors.append(f"Column mismatch: column {column} not in {stored_columns}")
+    
+    if errors:
+        raise Exception(f"Invalid sql. Errors={errors}")
+
+def get_database_schema_tables_from_config(config):
+    dbname = escape(config.get('dbname'))
+    schema = escape(config.get('schema'))
+    tables = config.get('table_selection')
+    # we need to build it up database.schema.table
+    tables = [f"{dbname}.{schema}.{escape(t.get('name'))}" for t in tables]
+    return dbname, schema, tables

@@ -68,7 +68,6 @@ def generate_pk_clause(catalog_entry, state):
 
     return sql
 
-
 def sync_table(snowflake_conn, catalog_entry, state, columns, stream_version):
     """Sync table with FULL_TABLE"""
     common.whitelist_bookmark_keys(BOOKMARK_KEYS, catalog_entry.tap_stream_id, state)
@@ -96,9 +95,14 @@ def sync_table(snowflake_conn, catalog_entry, state, columns, stream_version):
 
     with snowflake_conn.connect_with_backoff() as open_conn:
         with open_conn.cursor() as cur:
-            select_sql = common.generate_select_sql(catalog_entry, columns, snowflake_conn)
+            select_sql = common.get_custom_sql(snowflake_conn.connection_config,catalog_entry.table)
+            if not select_sql:
+                select_sql = common.generate_select_sql(catalog_entry, columns, snowflake_conn)
             params = {}
-
+            
+            dbname, schema, tables = common.get_database_schema_tables_from_config(snowflake_conn.connection_config)
+            common.validate_sql(select_sql, dbname, schema, tables, columns)
+            _, _, _, columns = common.extract_sql_components(select_sql)
             common.sync_query(cur,
                               catalog_entry,
                               state,

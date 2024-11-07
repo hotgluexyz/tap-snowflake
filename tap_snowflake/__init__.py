@@ -182,12 +182,8 @@ def discover_catalog(snowflake_conn, config):
     if config.get('tables'):
         tables = config.get('tables').split(',')
     elif config.get('table_selection'):
-        dbname = common.escape(config.get('dbname'))
-        schema = common.escape(config.get('schema'))
-        tables = config.get('table_selection')
-        # we need to build it up database.schema.table
-        tables = [f"{dbname}.{schema}.{common.escape(t.get('name'))}" for t in tables]
-
+        _, schema, tables = common.get_database_schema_tables_from_config(config)
+        
     sql_columns = get_table_columns(snowflake_conn, tables)
 
     table_info = {}
@@ -491,7 +487,7 @@ def sync_streams(snowflake_conn, catalog, state):
 
         md_map = metadata.to_map(catalog_entry.metadata)
 
-        replication_method = snowflake_conn.connection_config.get("replication_method") or md_map.get((), {}).get('replication-method')
+        replication_method = snowflake_conn.connection_config.get("replication_method") or md_map.get((), {}).get("replication-method", "")
 
         database_name = common.get_database_name(catalog_entry, snowflake_conn)
         schema_name = common.get_schema_name(catalog_entry, snowflake_conn)
