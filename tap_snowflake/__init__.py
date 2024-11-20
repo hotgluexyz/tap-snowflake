@@ -77,9 +77,9 @@ def schema_for_column(c):
     elif data_type in NUMBER_TYPES:
         result.type = ['null', 'number']
 
-    elif data_type in STRING_TYPES:
+    elif data_type in STRING_TYPES or data_type == "array":
         result.type = ['null', 'string']
-        result.maxLength = c.character_maximum_length
+        # result.maxLength = c.character_maximum_length
 
     elif data_type in DATETIME_TYPES:
         result.type = ['null', 'string']
