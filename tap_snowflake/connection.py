@@ -109,7 +109,8 @@ class SnowflakeConnection:
             database=self.connection_config['dbname'],
             warehouse=self.connection_config['warehouse'],
             role=self.connection_config.get('role', None),
-            insecure_mode=self.connection_config.get('insecure_mode', False)
+            insecure_mode=self.connection_config.get('insecure_mode', False),
+            client_session_keep_alive=self.connection_config.get('client_session_keep_alive', True)
             # Use insecure mode to avoid "Failed to get OCSP response" warnings
             # insecure_mode=True
         )
@@ -138,6 +139,7 @@ class SnowflakeConnection:
                 database=self.connection_config['dbname'],
                 insecure_mode=self.connection_config.get('insecure_mode', False),
                 role=self.connection_config.get('role', None),
+                client_session_keep_alive=self.connection_config.get('client_session_keep_alive', True)
             )
 
     def open_connection_oauth(self):

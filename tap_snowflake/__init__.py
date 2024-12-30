@@ -77,9 +77,9 @@ def schema_for_column(c):
     elif data_type in NUMBER_TYPES:
         result.type = ['null', 'number']
 
-    elif data_type in STRING_TYPES:
+    elif data_type in STRING_TYPES or data_type == "array":
         result.type = ['null', 'string']
-        result.maxLength = c.character_maximum_length
+        # result.maxLength = c.character_maximum_length
 
     elif data_type in DATETIME_TYPES:
         result.type = ['null', 'string']
@@ -182,11 +182,12 @@ def discover_catalog(snowflake_conn, config):
     if config.get('tables'):
         tables = config.get('tables').split(',')
     elif config.get('table_selection'):
-        dbname = config.get('dbname')
-        schema = config.get('schema')
+        dbname = common.escape(config.get('dbname'))
+        schema = common.escape(config.get('schema'))
         tables = config.get('table_selection')
         # we need to build it up database.schema.table
-        tables = [f"{dbname}.{schema}.{t.get('name')}" for t in tables]
+        tables = [f"{dbname}.{schema}.{common.escape(t.get('name'))}" for t in tables]
+
     
     # confirm warehouse exists and is active
     warehouses = snowflake_conn.query("SHOW WAREHOUSES;")
@@ -196,7 +197,6 @@ def discover_catalog(snowflake_conn, config):
     elif warehouse[0].get("state") == "SUSPENDED":
         raise Exception(f"Warehouse {config.get('warehouse')} is not active, state: SUSPENDED")
 
-    # if warehouse exist get table columns
     sql_columns = get_table_columns(snowflake_conn, tables)
 
     table_info = {}
@@ -500,7 +500,7 @@ def sync_streams(snowflake_conn, catalog, state):
 
         md_map = metadata.to_map(catalog_entry.metadata)
 
-        replication_method = snowflake_conn.connection_config.get("replication_method") or md_map.get((), {}).get('replication-method')
+        replication_method = snowflake_conn.connection_config.get("replication_method") or md_map.get((), {}).get('replication-method', "")
 
         database_name = common.get_database_name(catalog_entry, snowflake_conn)
         schema_name = common.get_schema_name(catalog_entry, snowflake_conn)
