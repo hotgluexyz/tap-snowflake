@@ -187,7 +187,16 @@ def discover_catalog(snowflake_conn, config):
         tables = config.get('table_selection')
         # we need to build it up database.schema.table
         tables = [f"{dbname}.{schema}.{t.get('name')}" for t in tables]
+    
+    # confirm warehouse exists and is active
+    warehouses = snowflake_conn.query("SHOW WAREHOUSES;")
+    warehouse = [wh for wh in warehouses if wh.get("name") == config.get("warehouse")]
+    if not warehouse:
+        raise Exception(f"Warehouse {config.get('warehouse')} doesn't exist")
+    elif warehouse[0].get("state") == "SUSPENDED":
+        raise Exception(f"Warehouse {config.get('warehouse')} is not active, state: SUSPENDED")
 
+    # if warehouse exist get table columns
     sql_columns = get_table_columns(snowflake_conn, tables)
 
     table_info = {}
