@@ -20,13 +20,9 @@ from singer.schema import Schema
 import tap_snowflake.sync_strategies.common as common
 import tap_snowflake.sync_strategies.full_table as full_table
 import tap_snowflake.sync_strategies.incremental as incremental
-from tap_snowflake.connection import SnowflakeConnection
+from tap_snowflake.connection import SnowflakeConnection, SHOW_COMMAND_MAX_ROWS
 
 LOGGER = singer.get_logger('tap_snowflake')
-
-# Max number of rows that a SHOW SCHEMAS|TABLES|COLUMNS can return.
-# If more than this number of rows returned then tap-snowflake will raise TooManyRecordsException
-SHOW_COMMAND_MAX_ROWS = 9999
 
 
 # Tone down snowflake connector logs noise
@@ -117,7 +113,7 @@ def create_column_metadata(cols):
     return metadata.to_list(mdata)
 
 
-def get_table_columns(snowflake_conn, tables):
+def get_table_columns(snowflake_conn: SnowflakeConnection, tables: list):
     """Get column definitions of a list of tables
 
        It's using SHOW commands instead of INFORMATION_SCHEMA views because information_schemas views are slow
@@ -143,30 +139,7 @@ def get_table_columns(snowflake_conn, tables):
         show_columns = f'SHOW COLUMNS IN TABLE {table}'
 
         # Convert output of SHOW commands to tables and use SQL joins to get every required information
-        select = """
-            WITH
-              show_columns  AS (SELECT * FROM TABLE(RESULT_SCAN(%(LAST_QID)s)))
-            SELECT show_columns."database_name"     AS table_catalog
-                  ,show_columns."schema_name"       AS table_schema
-                  ,show_columns."table_name"        AS table_name
-                  ,show_columns."column_name"       AS column_name
-                  -- ----------------------------------------------------------------------------------------
-                  -- Character and numeric columns display their generic data type rather than their defined
-                  -- data type (i.e. TEXT for all character types, FIXED for all fixed-point numeric types,
-                  -- and REAL for all floating-point numeric types).
-                  --
-                  -- Further info at https://docs.snowflake.net/manuals/sql-reference/sql/show-columns.html
-                  -- ----------------------------------------------------------------------------------------
-                  ,CASE PARSE_JSON(show_columns."data_type"):type::varchar
-                     WHEN 'FIXED' THEN 'NUMBER'
-                     WHEN 'REAL'  THEN 'FLOAT'
-                     ELSE PARSE_JSON("data_type"):type::varchar
-                   END data_type
-                  ,PARSE_JSON(show_columns."data_type"):length::number      AS character_maximum_length
-                  ,PARSE_JSON(show_columns."data_type"):precision::number   AS numeric_precision
-                  ,PARSE_JSON(show_columns."data_type"):scale::number       AS numeric_scale
-              FROM show_columns
-        """
+        select = snowflake_conn.get_data_type_query()
         queries.extend([show_columns, select])
 
         # Run everything in one transaction
@@ -176,18 +149,33 @@ def get_table_columns(snowflake_conn, tables):
     return table_columns
 
 
-def discover_catalog(snowflake_conn, config):
+def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict):
     """Returns a Catalog describing the structure of the database."""
     tables = None
+    temporary_tables = None
     if config.get('tables'):
         tables = config.get('tables').split(',')
     elif config.get('table_selection'):
         dbname = common.escape(config.get('dbname'))
         schema = common.escape(config.get('schema'))
-        tables = config.get('table_selection')
+        if config.get('table_selection'):
+            if not tables:
+                tables = []
+            tables_from_config = [f"{dbname}.{schema}.{common.escape(t.get('name'))}" for t in config.get('table_selection')]
+            tables.extend(tables_from_config)
         # we need to build it up database.schema.table
-        tables = [f"{dbname}.{schema}.{common.escape(t.get('name'))}" for t in tables]
-
+        if config.get('queries'):
+            if not tables:
+                tables = []
+            temporary_tables = []
+            for query_info in config.get('queries'):
+                query = query_info.get('query')
+                table_name = query_info.get('name')
+                replication_key_field = query_info.get('replication_key_field')
+                replication_key_condition = query_info.get('replication_key_condition').format(replication_key_field = replication_key_field)
+                query = query.format(replication_key_condition = replication_key_condition, replication_key_field = replication_key_field)
+                temporary_tables.append(snowflake_conn.create_temporary_table(table_name, query))
+            tables.extend(temporary_tables)
     
     # confirm warehouse exists and is active
     warehouses = snowflake_conn.query("SHOW WAREHOUSES;")
@@ -256,15 +244,28 @@ def discover_catalog(snowflake_conn, config):
             replication_key = None
             key_properties = None
             replication_method = "FULL_TABLE"
-            table_config_data = [table for table in config.get("table_selection", []) if table.get("name") == table_name]
-            if table_config_data:
-                table_config_data = table_config_data[0]
-                replication_key = table_config_data.get("replication_key")
+            table_selection_config_data = [table for table in config.get("table_selection", []) if table.get("name") == table_name]
+            query_config_data = [query for query in config.get("queries", []) if query.get("name").lower() == table_name.lower()]
+            if table_selection_config_data:
+                table_selection_config_data = table_selection_config_data[0]
+                replication_key = table_selection_config_data.get("replication_key")
                 if replication_key:
                     replication_method = "INCREMENTAL"
-                key_properties = table_config_data.get("primary_key")
+                key_properties = table_selection_config_data.get("primary_key")
                 if key_properties and isinstance(key_properties, str):
                     key_properties = [key_properties]
+            elif query_config_data:
+                query_config_data = query_config_data[0]
+                replication_key = query_config_data.get("replication_key_field")
+                key_properties = []
+                if replication_key:
+                    replication_method = "INCREMENTAL"
+                    key_properties.append(replication_key)
+                primary_key = query_config_data.get("primary_key")
+                if primary_key and isinstance(primary_key, str):
+                    key_properties.append(primary_key)
+                if not key_properties:
+                    key_properties = None
             else:
                 LOGGER.info(f"No config data found for table {table_name}, primary key and replication key not set.")
 
@@ -279,6 +280,9 @@ def discover_catalog(snowflake_conn, config):
                 replication_method=replication_method)
 
             entries.append(entry)
+
+    if temporary_tables:
+        snowflake_conn.drop_temporary_tables_if_exists(temporary_tables)
 
     return Catalog(entries)
 
