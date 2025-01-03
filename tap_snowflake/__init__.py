@@ -149,7 +149,7 @@ def get_table_columns(snowflake_conn: SnowflakeConnection, tables: list):
     return table_columns
 
 
-def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict):
+def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict, get_query_result=False):
     """Returns a Catalog describing the structure of the database."""
     tables = None
     temporary_tables = None
@@ -174,7 +174,7 @@ def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict):
                 replication_key_field = query_info.get('replication_key_field')
                 replication_key_condition = query_info.get('replication_key_condition').format(replication_key_field = replication_key_field)
                 query = query.format(replication_key_condition = replication_key_condition, replication_key_field = replication_key_field)
-                temporary_tables.append(snowflake_conn.create_temporary_table(table_name, query))
+                temporary_tables.append(snowflake_conn.create_table(table_name, query, limit_query=not get_query_result))
             tables.extend(temporary_tables)
     
     # confirm warehouse exists and is active
@@ -280,15 +280,14 @@ def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict):
                 replication_method=replication_method)
 
             entries.append(entry)
-
-    if temporary_tables:
-        snowflake_conn.drop_temporary_tables_if_exists(temporary_tables)
-
-    return Catalog(entries)
+    return Catalog(entries), temporary_tables
 
 
 def do_discover(snowflake_conn, config):
-    discover_catalog(snowflake_conn, config).dump()
+    catalog, temporary_tables = discover_catalog(snowflake_conn, config)
+    if temporary_tables:
+        snowflake_conn.drop_temporary_tables_if_exists(temporary_tables)
+    catalog.dump()
 
 
 # pylint: disable=fixme
@@ -393,7 +392,7 @@ def get_streams(snowflake_conn, catalog, config, state):
       2. any streams that do not have state
       3. any streams that do not have a replication method of LOG_BASED
     """
-    discovered = discover_catalog(snowflake_conn, config)
+    discovered, temporary_tables = discover_catalog(snowflake_conn, config, get_query_result=True)
 
     # Filter catalog to include only selected streams
     # pylint: disable=unnecessary-lambda
@@ -428,7 +427,7 @@ def get_streams(snowflake_conn, catalog, config, state):
         # prioritize streams that have not been processed
         streams_to_sync = ordered_streams
 
-    return resolve_catalog(discovered, streams_to_sync)
+    return resolve_catalog(discovered, streams_to_sync), temporary_tables
 
 
 def write_schema_message(catalog_entry, bookmark_properties=None, snowflake_conn=None):
@@ -525,8 +524,10 @@ def sync_streams(snowflake_conn, catalog, state):
 
 
 def do_sync(snowflake_conn, config, catalog, state):
-    catalog = get_streams(snowflake_conn, catalog, config, state)
+    catalog, temporary_tables = get_streams(snowflake_conn, catalog, config, state)
     sync_streams(snowflake_conn, catalog, state)
+    if temporary_tables:
+        snowflake_conn.drop_temporary_tables_if_exists(temporary_tables)
 
 
 def main_impl():

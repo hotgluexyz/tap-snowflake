@@ -213,35 +213,35 @@ class SnowflakeConnection:
 
         return result
 
-    def create_temporary_table(self, table_name, query):
+    def create_table(self, table_name, query, limit_query=True):
+        '''
+        Create a table and return the result of the query or the table structure
+        limit_query: if True, limit the query to 0 rows, if False, do not add a limit to the query
+        '''
         
         has_limit = re.search(r'\bLIMIT\s+\d+', query, re.IGNORECASE)
 
-        if has_limit:
-            # Replace the existing LIMIT clause with LIMIT 0
-            query = re.sub(r'\bLIMIT\s+\d+', 'LIMIT 0', query, flags=re.IGNORECASE)
-        else:
-            # Append LIMIT 0 to the query. Do not execute the query only describe it
-            query = query + " LIMIT 0"
+        if limit_query:
+            if has_limit:
+                # Replace the existing LIMIT clause with LIMIT 0
+                query = re.sub(r'\bLIMIT\s+\d+', 'LIMIT 0', query, flags=re.IGNORECASE)
+            else:
+                # Append LIMIT 0 to the query. Do not execute the query only describe it
+                query = query + " LIMIT 0"
         
         with self.connect_with_backoff() as connection:
             with connection.cursor(snowflake.connector.DictCursor) as cur:
                 qid = None
                 params = {}
                 try:
-                    params['LAST_QID'] = qid
-                    cur.execute(query, params)
-                    qid = cur.sfqid
-                    result = cur.fetchall()
+                    cur.execute(f"SELECT 1 FROM {table_name}")
+                    raise ValueError(f"Table {table_name} already exists - Please rename the query to a unique table name")
                 except Exception as e:
-                    LOGGER.error(f"Error executing query: {e}")
-                    raise e
-
-                cur.execute(f"DROP TABLE IF EXISTS {table_name}")
+                    LOGGER.info(f"Table {table_name} does not exist - Creating it")
                 cur.execute(f"CREATE TABLE IF NOT EXISTS {table_name} AS ({query})")
                 cur.execute(f'SHOW COLUMNS IN TABLE {table_name}')
                 qid = cur.sfqid
-                params['LAST_QID'] = qid
+                params = {'LAST_QID': qid}
                 cur.execute(self.get_data_type_query(), params)
                 if cur.rowcount > 0:
                     result = cur.fetchall()
