@@ -194,8 +194,6 @@ def discover_catalog(snowflake_conn, config):
     warehouse = [wh for wh in warehouses if wh.get("name") == config.get("warehouse")]
     if not warehouse:
         raise Exception(f"Warehouse {config.get('warehouse')} doesn't exist")
-    elif warehouse[0].get("state") == "SUSPENDED":
-        raise Exception(f"Warehouse {config.get('warehouse')} is not active, state: SUSPENDED")
 
     sql_columns = get_table_columns(snowflake_conn, tables)
 
