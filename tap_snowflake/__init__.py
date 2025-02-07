@@ -164,18 +164,18 @@ def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict, get_quer
             tables_from_config = [f"{dbname}.{schema}.{common.escape(t.get('name'))}" for t in config.get('table_selection')]
             tables.extend(tables_from_config)
         # we need to build it up database.schema.table
-        if config.get('queries'):
-            if not tables:
-                tables = []
-            temporary_tables = []
-            for query_info in config.get('queries'):
-                query = query_info.get('query')
-                table_name = query_info.get('name')
-                replication_key_field = query_info.get('replication_key_field')
-                replication_key_condition = query_info.get('replication_key_condition').format(replication_key_field = replication_key_field)
-                query = query.format(replication_key_condition = replication_key_condition, replication_key_field = replication_key_field)
-                temporary_tables.append(snowflake_conn.create_table(table_name, query, limit_query=not get_query_result))
-            tables.extend(temporary_tables)
+    elif config.get('queries'):
+        if not tables:
+            tables = []
+        temporary_tables = []
+        for query_info in config.get('queries'):
+            query = query_info.get('query')
+            table_name = query_info.get('name')
+            replication_key_field = query_info.get('replication_key_field')
+            replication_key_condition = query_info.get('replication_key_condition', '').format(replication_key_field = replication_key_field)
+            query = query.format(replication_key_condition = replication_key_condition, replication_key_field = replication_key_field)
+            temporary_tables.append(snowflake_conn.create_table(table_name, query, limit_query=not get_query_result))
+        tables.extend(temporary_tables)
     
     # confirm warehouse exists and is active
     warehouses = snowflake_conn.query("SHOW WAREHOUSES;")

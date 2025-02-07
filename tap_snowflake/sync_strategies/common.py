@@ -86,7 +86,8 @@ def get_key_properties(catalog_entry, snowflake_conn=None):
     stream_metadata = catalog_metadata.get((), {})
     if snowflake_conn:
         config = snowflake_conn.connection_config
-        tables = config['table_selection']
+        tables = config.get('queries')
+        
         table = [x for x in tables if x.get('name') == catalog_entry.table]
 
         if len(table) > 0:
