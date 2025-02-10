@@ -78,7 +78,7 @@ There are three formats that you can do this in:
 ]
 ```
 
-If a `replication_key` is not provided, the entire table will be synced during each job.
+If a `replication_key` is not provided, the entire table will be synced during each job. If so, you can use a `primary_key` field to specify what identifier should be used for upserting.
 
 3. `queries`
 
@@ -95,7 +95,7 @@ If a `replication_key` is not provided, the entire table will be synced during e
 
 During syncing, `{replication_key_condition}` will be replaced with something like `CREATEDAT > <TIME_OF_LAST_SYNC>`
 
-If a `replication_key` is not provided, the entire table will be synced during each job.
+If a `replication_key` is not provided, the entire table will be synced during each job. If so, you can use a `primary_key` field to specify what identifier should be used for upserting.
 
 ### Discovery mode
 
