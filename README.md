@@ -88,7 +88,7 @@ If a `replication_key` is not provided, the entire table will be synced during e
     {
       "name": "LISTS_NEW",
       "query": "SELECT COLUMN_A, COLUMN_B FROM TABLE_NAME WHERE {replication_key_condition} AND <condition>",
-      "replication_key": "CREATEDAT"
+      "replication_key": "COLUMN WITH DATE TIME YOU WANT TO FILTER BY"
     }
   ]
 ```

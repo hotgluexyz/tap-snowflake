@@ -89,10 +89,10 @@ def get_key_properties(catalog_entry, snowflake_conn=None):
         if config.get('queries') or config.get('table_selection'):
             tables = config.get('queries') or config.get('table_selection')
             
-            table = [x for x in tables if x.get('name') == catalog_entry.table]
+            table = next((x for x in tables if x.get('name') == catalog_entry.table), None)
 
-            if len(table) > 0:
-                primary_key = table[0].get('primary_key')
+            if table:
+                primary_key = table.get('primary_key')
                 if primary_key is not None:
                     return [primary_key]
 

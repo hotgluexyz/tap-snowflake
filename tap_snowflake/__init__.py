@@ -452,10 +452,10 @@ def do_sync_incremental(snowflake_conn, catalog_entry, state, columns):
     config = snowflake_conn.connection_config
     if config.get("table_selection"):
         tables = config['table_selection']
-        table = [x for x in tables if x.get('name') == catalog_entry.table]
+        table = next((x for x in tables if x.get('name') == catalog_entry.table), None)
 
-        if len(table) > 0:
-            replication_key = table[0].get('replication_key')
+        if table:
+            replication_key = table.get('replication_key')
 
     if not replication_key:
         raise Exception(f'Cannot use INCREMENTAL replication for table ({catalog_entry.stream}) without a replication '

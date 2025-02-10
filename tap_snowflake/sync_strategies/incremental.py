@@ -23,10 +23,10 @@ def sync_table(snowflake_conn, catalog_entry, state, columns):
 
     if config.get("table_selection"):
         tables = config['table_selection']
-        table = [x for x in tables if x.get('name') == catalog_entry.table]
+        table = next((x for x in tables if x.get('name') == catalog_entry.table), None)
 
-        if len(table) > 0:
-            replication_key_metadata = table[0]['replication_key']
+        if table:
+            replication_key_metadata = table['replication_key']
 
     replication_key_state = singer.get_bookmark(state,
                                                 catalog_entry.tap_stream_id,
