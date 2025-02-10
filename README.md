@@ -30,12 +30,6 @@ make venv
 
 1. Create a `config.json` file with connection details to snowflake, here is a [sample config file](./config_sample.json).
 
-**Note**: `tables` is a mandatory parameter as well to avoid a long-running catalog discovery process.
-Please specify fully qualified table and view names and only that ones that you need to extract otherwise you can
-end up with very long running discovery mode of this tap. Discovery mode is analysing table structures but
-Snowflake doesn't like selecting lot of rows from `INFORMATION_SCHEMA` or running `SHOW` commands that returns lot of
-rows. Please be as specific as possible.
-
 2. Run it in discovery mode to generate a `properties.json`
 
 3. Edit the `properties.json` and select the streams to replicate
@@ -58,6 +52,50 @@ Populate `user` and `password` in the `config.json` file
 
 To use key pair authentication, omit the `password` and instead provide the `private_key_path` to the unencrypted version of the private key and, optionally, the `private_key_passphrase`.
 
+### Table Specification
+
+It is required that you specify which tables you want to stream in `config.json`. Only specify the ones that you need to extract otherwise you can end up with very long running discovery mode of this tap. Discovery mode is analysing table structures but Snowflake doesn't like selecting lot of rows from `INFORMATION_SCHEMA` or running `SHOW` commands that returns lot of rows. Please be as specific as possible.
+
+There are three formats that you can do this in:
+
+1. `tables`
+
+```
+"tables"="FULLY_QUALIFIED_TABLE_ONE_NAME, FULLY_QUALIFIED_TABLE_TWO_NAME, ..."
+```
+
+**Note**: Please specify fully qualified table and view names.
+
+2. `table_selection`
+
+```
+"schema": "DB Schema name"
+"table_selection": [
+  {
+    "name": "TABLE NAME",
+    "replication_key": "DATETIME COLUMN TO USE FOR INCREMENTAL SYNCS"
+  }
+]
+```
+
+If a `replication_key` is not provided, the entire table will be synced during each job.
+
+3. `queries`
+
+```
+  "schema": "PUBLIC",
+  "queries": [
+    {
+      "name": "LISTS_NEW",
+      "query": "SELECT COLUMN_A, COLUMN_B FROM TABLE_NAME WHERE {replication_key_condition} AND <condition>",
+      "replication_key": "CREATEDAT"
+    }
+  ]
+```
+
+During syncing, `{replication_key_condition}` will be replaced with something like `CREATEDAT > <TIME_OF_LAST_SYNC>`
+
+If a `replication_key` is not provided, the entire table will be synced during each job.
 
 ### Discovery mode
 
@@ -66,7 +104,6 @@ columns in the database:
 
 ```bash
 $ tap-snowflake --config config.json --discover
-
 ```
 
 A discovered catalog is output, with a JSON-schema description of each table. A
@@ -78,18 +115,17 @@ The two ways to replicate a given table are `FULL_TABLE` and `INCREMENTAL`.
 
 ### Full Table
 
-Full-table replication extracts all data from the source table each time the tap
-is invoked.
+Full-table replication extracts all data from the source table each time the tap is invoked.
 
 ### Incremental
 
-Incremental replication works in conjunction with a state file to only extract
-new records each time the tap is invoked. This requires a replication key to be
+Incremental replication works in conjunction with a state file to only extract new records each time the tap is invoked. This requires a replication key to be
 specified in the table's metadata as well.
 
 ### To run tests:
 
 1. Define environment variables that requires running the tests
+
 ```
   export TAP_SNOWFLAKE_ACCOUNT=<snowflake-account-name>
   export TAP_SNOWFLAKE_DBNAME=<snowflake-database-name>
@@ -101,6 +137,7 @@ specified in the table's metadata as well.
 ```
 
 2. Install python dependencies
+
 ```bash
 make venv
 ```
@@ -114,10 +151,10 @@ make unit_test
 ```
 
 4. To run Integration tests
+
 ```bash
 make integration_test
 ```
-
 
 ### To run formatting and linting:
 
@@ -130,4 +167,3 @@ make venv format pylint
 Apache License Version 2.0
 
 See [LICENSE](LICENSE) to see the full text.
-

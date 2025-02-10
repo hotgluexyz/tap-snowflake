@@ -171,9 +171,10 @@ def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict, get_quer
         for query_info in config.get('queries'):
             query = query_info.get('query')
             table_name = query_info.get('name')
-            replication_key_field = query_info.get('replication_key_field')
-            replication_key_condition = query_info.get('replication_key_condition', '').format(replication_key_field = replication_key_field)
-            query = query.format(replication_key_condition = replication_key_condition, replication_key_field = replication_key_field)
+            replication_key_field = query_info.get('replication_key')
+            start_date = config.get('start_date')
+            replication_key_condition = f"{replication_key_field} > '{start_date}'" if start_date else "1=1"
+            query = query.format(replication_key_condition = replication_key_condition)
             temporary_tables.append(snowflake_conn.create_table(table_name, query, limit_query=not get_query_result))
         tables.extend(temporary_tables)
     
@@ -256,7 +257,7 @@ def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict, get_quer
                     key_properties = [key_properties]
             elif query_config_data:
                 query_config_data = query_config_data[0]
-                replication_key = query_config_data.get("replication_key_field")
+                replication_key = query_config_data.get("replication_key")
                 key_properties = []
                 if replication_key:
                     replication_method = "INCREMENTAL"
@@ -343,7 +344,7 @@ def resolve_catalog(discovered_catalog, streams_to_sync):
     # with the same stream in the discovered catalog.
     for catalog_entry in streams_to_sync:
         catalog_metadata = metadata.to_map(catalog_entry.metadata)
-        replication_key = catalog_metadata.get((), {}).get('replication-key')
+        replication_key = catalog_entry.to_dict().get('replication_key')
 
         discovered_table = discovered_catalog.get_stream(catalog_entry.tap_stream_id)
         database_name = common.get_database_name(catalog_entry)
@@ -358,17 +359,19 @@ def resolve_catalog(discovered_catalog, streams_to_sync):
 
         # These are the columns we need to select
         columns = desired_columns(selected, discovered_table.schema)
-
+        replication_method = catalog_entry.to_dict().get('replication_method')
         result.streams.append(CatalogEntry(
             tap_stream_id=catalog_entry.tap_stream_id,
             metadata=catalog_entry.metadata,
             stream=catalog_entry.tap_stream_id,
             table=catalog_entry.table,
+            replication_key=replication_key,
             schema=Schema(
                 type='object',
                 properties={col: discovered_table.schema.properties[col]
                             for col in columns}
-            )
+            ),
+            replication_method=replication_method,
         ))
 
     return result
@@ -444,8 +447,7 @@ def write_schema_message(catalog_entry, bookmark_properties=None, snowflake_conn
 def do_sync_incremental(snowflake_conn, catalog_entry, state, columns):
     LOGGER.info('Stream %s is using incremental replication', catalog_entry.stream)
 
-    md_map = metadata.to_map(catalog_entry.metadata)
-    replication_key = md_map.get((), {}).get('replication-key')
+    replication_key = catalog_entry.to_dict().get('replication_key')
 
     config = snowflake_conn.connection_config
     if config.get("table_selection"):
@@ -503,7 +505,7 @@ def sync_streams(snowflake_conn, catalog, state):
 
         md_map = metadata.to_map(catalog_entry.metadata)
 
-        replication_method = snowflake_conn.connection_config.get("replication_method") or md_map.get((), {}).get('replication-method', "")
+        replication_method = snowflake_conn.connection_config.get("replication_method") or catalog_entry.to_dict().get('replication_method')
 
         database_name = common.get_database_name(catalog_entry, snowflake_conn)
         schema_name = common.get_schema_name(catalog_entry, snowflake_conn)
@@ -511,7 +513,6 @@ def sync_streams(snowflake_conn, catalog, state):
         with metrics.job_timer('sync_table') as timer:
             timer.tags['database'] = database_name
             timer.tags['table'] = catalog_entry.table
-
             LOGGER.info('Beginning to sync %s.%s.%s', database_name, schema_name, catalog_entry.table)
 
             if replication_method.lower() == 'incremental':
