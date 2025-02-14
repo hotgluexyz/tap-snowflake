@@ -436,7 +436,7 @@ def write_schema_message(catalog_entry, bookmark_properties=None, snowflake_conn
     ))
 
 
-def do_sync_incremental(snowflake_conn, catalog_entry, state, columns):
+def do_sync_incremental(snowflake_conn, catalog_entry, state, columns, config={}):
     LOGGER.info('Stream %s is using incremental replication', catalog_entry.stream)
 
     md_map = metadata.to_map(catalog_entry.metadata)
@@ -458,7 +458,7 @@ def do_sync_incremental(snowflake_conn, catalog_entry, state, columns):
                          bookmark_properties=[replication_key],
                          snowflake_conn=snowflake_conn)
 
-    incremental.sync_table(snowflake_conn, catalog_entry, state, columns)
+    incremental.sync_table(snowflake_conn, catalog_entry, state, columns, config)
 
     singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
 
@@ -483,7 +483,7 @@ def do_sync_full_table(snowflake_conn, catalog_entry, state, columns):
     singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
 
 
-def sync_streams(snowflake_conn, catalog, state):
+def sync_streams(snowflake_conn, catalog, state, config={}):
     for catalog_entry in catalog.streams:
         columns = list(catalog_entry.schema.properties.keys())
 
@@ -510,7 +510,7 @@ def sync_streams(snowflake_conn, catalog, state):
             LOGGER.info('Beginning to sync %s.%s.%s', database_name, schema_name, catalog_entry.table)
 
             if replication_method.lower() == 'incremental':
-                do_sync_incremental(snowflake_conn, catalog_entry, state, columns)
+                do_sync_incremental(snowflake_conn, catalog_entry, state, columns, config)
             else:
                 do_sync_full_table(snowflake_conn, catalog_entry, state, columns)
 
@@ -520,7 +520,7 @@ def sync_streams(snowflake_conn, catalog, state):
 
 def do_sync(snowflake_conn, config, catalog, state):
     catalog = get_streams(snowflake_conn, catalog, config, state)
-    sync_streams(snowflake_conn, catalog, state)
+    sync_streams(snowflake_conn, catalog, state, config)
 
 
 def main_impl():
