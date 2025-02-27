@@ -38,6 +38,7 @@ make venv
 
 ```
   tap-snowflake --config config.json --properties properties.json --state state.json
+  
 ```
 
 ### Authentication Methods
