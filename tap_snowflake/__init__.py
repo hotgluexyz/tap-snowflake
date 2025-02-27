@@ -149,24 +149,18 @@ def get_table_columns(snowflake_conn: SnowflakeConnection, tables: list):
     return table_columns
 
 
-def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict, get_query_result=False):
-    """Returns a Catalog describing the structure of the database."""
-    tables = None
-    temporary_tables = None
+def get_tables(snowflake_conn: SnowflakeConnection, config: dict, get_query_result=False):
     if config.get('tables'):
         tables = config.get('tables').split(',')
-    elif config.get('table_selection'):
+        return tables
+
+    if config.get('table_selection'):
         dbname = common.escape(config.get('dbname'))
         schema = common.escape(config.get('schema'))
-        if config.get('table_selection'):
-            if not tables:
-                tables = []
-            tables_from_config = [f"{dbname}.{schema}.{common.escape(t.get('name'))}" for t in config.get('table_selection')]
-            tables.extend(tables_from_config)
-        # we need to build it up database.schema.table
-    elif config.get('queries'):
-        if not tables:
-            tables = []
+        tables = [f"{dbname}.{schema}.{common.escape(t.get('name'))}" for t in config.get('table_selection')]
+        return tables
+    
+    if config.get('queries'):
         temporary_tables = []
         for query_info in config.get('queries'):
             query = query_info.get('query')
@@ -176,7 +170,13 @@ def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict, get_quer
             replication_key_condition = f"{replication_key_field} > '{start_date}'" if start_date else "1=1"
             query = query.format(replication_key_condition = replication_key_condition)
             temporary_tables.append(snowflake_conn.create_table(table_name, query, limit_query=not get_query_result))
-        tables.extend(temporary_tables)
+        tables = temporary_tables
+        return tables
+    
+
+def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict, get_query_result=False):
+    """Returns a Catalog describing the structure of the database."""
+    tables = get_tables(snowflake_conn, config, get_query_result)
     
     # confirm warehouse exists and is active
     warehouses = snowflake_conn.query("SHOW WAREHOUSES;")
@@ -279,6 +279,8 @@ def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict, get_quer
                 replication_method=replication_method)
 
             entries.append(entry)
+    
+    temporary_tables = tables if config.get('queries') else None
     return Catalog(entries), temporary_tables
 
 

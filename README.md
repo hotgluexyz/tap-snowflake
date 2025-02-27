@@ -54,7 +54,7 @@ To use key pair authentication, omit the `password` and instead provide the `pri
 
 ### Table Specification
 
-It is required that you specify which tables you want to stream in `config.json`. Only specify the ones that you need to extract otherwise you can end up with very long running discovery mode of this tap. Discovery mode is analysing table structures but Snowflake doesn't like selecting lot of rows from `INFORMATION_SCHEMA` or running `SHOW` commands that returns lot of rows. Please be as specific as possible.
+It is required that you specify which tables you want to stream in `config.json`. Only specify the ones that you need to extract otherwise you can end up with very long running discovery for this tap. Discovery involves analysing table structures but Snowflake is slow to select lot of rows from `INFORMATION_SCHEMA` and slow to run `SHOW` commands that returns lot of rows. Please be as specific as possible.
 
 There are three formats that you can do this in:
 
@@ -125,7 +125,6 @@ specified in the table's metadata as well.
 ### To run tests:
 
 1. Define environment variables that requires running the tests
-
 ```
   export TAP_SNOWFLAKE_ACCOUNT=<snowflake-account-name>
   export TAP_SNOWFLAKE_DBNAME=<snowflake-database-name>
@@ -137,7 +136,6 @@ specified in the table's metadata as well.
 ```
 
 2. Install python dependencies
-
 ```bash
 make venv
 ```
@@ -151,10 +149,10 @@ make unit_test
 ```
 
 4. To run Integration tests
-
 ```bash
 make integration_test
 ```
+
 
 ### To run formatting and linting:
 

@@ -9,7 +9,6 @@ import sys
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 import snowflake.connector
-import time
 
 LOGGER = singer.get_logger('tap_snowflake')
 
