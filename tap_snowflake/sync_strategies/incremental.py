@@ -10,7 +10,7 @@ LOGGER = singer.get_logger('tap_snowflake')
 
 BOOKMARK_KEYS = {'replication_key', 'replication_key_value', 'version'}
 
-def sync_table(snowflake_conn, catalog_entry, state, columns):
+def sync_table(snowflake_conn, catalog_entry, state, columns, config={}):
     """Sync table incrementally"""
     common.whitelist_bookmark_keys(BOOKMARK_KEYS, catalog_entry.tap_stream_id, state)
 
@@ -32,15 +32,14 @@ def sync_table(snowflake_conn, catalog_entry, state, columns):
                                                 catalog_entry.tap_stream_id,
                                                 'replication_key')
 
-    replication_key_value = None
-    if config.get("start_date"):
-        start_date = pendulum.parse(config.get("start_date"))
-        start_date = start_date.strftime("%Y-%m-%d %H:%M:%S")
-        replication_key_value = start_date
-    elif replication_key == replication_key_state:
+    replication_key_value = config.get("start_date")
+    LOGGER.info(f"Got start_date from config {replication_key_value}")
+
+    if replication_key_metadata == replication_key_state:
         replication_key_value = singer.get_bookmark(state,
                                                     catalog_entry.tap_stream_id,
                                                     'replication_key_value')
+        LOGGER.info(f"Got start_date from state {replication_key_value}")
     else:
         state = singer.write_bookmark(state,
                                       catalog_entry.tap_stream_id,

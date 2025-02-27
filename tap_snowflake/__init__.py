@@ -73,7 +73,7 @@ def schema_for_column(c):
     elif data_type in NUMBER_TYPES:
         result.type = ['null', 'number']
 
-    elif data_type in STRING_TYPES or data_type == "array":
+    elif data_type in STRING_TYPES or data_type in ["array", "object"]:
         result.type = ['null', 'string']
         # result.maxLength = c.character_maximum_length
 
@@ -183,8 +183,6 @@ def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict, get_quer
     warehouse = [wh for wh in warehouses if wh.get("name") == config.get("warehouse")]
     if not warehouse:
         raise Exception(f"Warehouse {config.get('warehouse')} doesn't exist")
-    elif warehouse[0].get("state") == "SUSPENDED":
-        raise Exception(f"Warehouse {config.get('warehouse')} is not active, state: SUSPENDED")
 
     sql_columns = get_table_columns(snowflake_conn, tables)
 
@@ -444,7 +442,7 @@ def write_schema_message(catalog_entry, bookmark_properties=None, snowflake_conn
     ))
 
 
-def do_sync_incremental(snowflake_conn, catalog_entry, state, columns):
+def do_sync_incremental(snowflake_conn, catalog_entry, state, columns, config={}):
     LOGGER.info('Stream %s is using incremental replication', catalog_entry.stream)
 
     replication_key = catalog_entry.to_dict().get('replication_key')
@@ -465,7 +463,7 @@ def do_sync_incremental(snowflake_conn, catalog_entry, state, columns):
                          bookmark_properties=[replication_key],
                          snowflake_conn=snowflake_conn)
 
-    incremental.sync_table(snowflake_conn, catalog_entry, state, columns)
+    incremental.sync_table(snowflake_conn, catalog_entry, state, columns, config)
 
     singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
 
@@ -490,7 +488,7 @@ def do_sync_full_table(snowflake_conn, catalog_entry, state, columns):
     singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
 
 
-def sync_streams(snowflake_conn, catalog, state):
+def sync_streams(snowflake_conn, catalog, state, config={}):
     for catalog_entry in catalog.streams:
         columns = list(catalog_entry.schema.properties.keys())
 
@@ -516,7 +514,7 @@ def sync_streams(snowflake_conn, catalog, state):
             LOGGER.info('Beginning to sync %s.%s.%s', database_name, schema_name, catalog_entry.table)
 
             if replication_method.lower() == 'incremental':
-                do_sync_incremental(snowflake_conn, catalog_entry, state, columns)
+                do_sync_incremental(snowflake_conn, catalog_entry, state, columns, config)
             else:
                 do_sync_full_table(snowflake_conn, catalog_entry, state, columns)
 
