@@ -23,7 +23,8 @@ setup(name='pipelinewise-tap-snowflake',
             'pyOpenSSL==22.1.0',
             'pipelinewise-singer-python==1.*',
             'requests==2.22.0',
-            'snowflake-connector-python~=3.4.0',
+            'snowflake-connector-python~=2.0.4; python_version == "3.7"',
+            'snowflake-connector-python~=3.4.0; python_version == "3.10"',
             'pendulum==1.2.0'
       ],
       extras_require={
