@@ -49,7 +49,7 @@ def validate_config(config):
 
     possible_authentication_keys =  [
       'password',
-      'private_key_path',
+      'private_key',
       'access_token'
     ]
     if not any(config.get(k, None) for k in possible_authentication_keys):
@@ -74,30 +74,33 @@ class SnowflakeConnection:
             LOGGER.error('Invalid configuration:\n   * %s', '\n   * '.join(config_errors))
             sys.exit(1)
 
+    
+
     def get_private_key(self):
-        """
-        Get private key from the right location
-        """
-        if self.connection_config.get('private_key_path'):
-            try:
-                encoded_passphrase = self.connection_config['private_key_passphrase'].encode()
-            except KeyError:
-                encoded_passphrase = None
+        if not self.connection_config.get('private_key'):
+            return None
 
-            with open(self.connection_config['private_key_path'], 'rb') as key:
-                p_key= serialization.load_pem_private_key(
-                        key.read(),
-                        password=encoded_passphrase,
-                        backend=default_backend()
-                    )
+        private_key_str = self.connection_config['private_key']
+        private_key_password = self.connection_config.get('private_key_password', None)
 
-            pkb = p_key.private_bytes(
-                    encoding=serialization.Encoding.DER,
-                    format=serialization.PrivateFormat.PKCS8,
-                    encryption_algorithm=serialization.NoEncryption())
-            return pkb
+        # Convert string to bytes
+        pem_private_key = private_key_str.encode('utf-8')
+        password = private_key_password.encode('utf-8') if private_key_password else None
 
-        return None
+        # Convert from PEM to DER formats
+        private_key = serialization.load_pem_private_key(
+            pem_private_key,
+            password=password,
+            backend=default_backend()
+        )
+        der_private_key = private_key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+
+        return der_private_key
+
 
     def open_connection(self):
         """Connect to snowflake database"""

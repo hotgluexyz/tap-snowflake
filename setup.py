@@ -19,12 +19,14 @@ setup(name='pipelinewise-tap-snowflake',
       py_modules=['tap_snowflake'],
       install_requires=[
             'certifi==2022.9.24',
-            'cryptography==38.0.4',
+            'cryptography==38.0.4; python_version == "3.7"',
             'pyOpenSSL==22.1.0',
             'pipelinewise-singer-python==1.*',
             'requests==2.22.0',
-            'snowflake-connector-python~=2.0.4',
-            'pendulum==1.2.0'
+            'numpy<1.24.0', 
+            'snowflake-connector-python~=2.0.4; python_version == "3.7"',
+            'snowflake-connector-python[pandas]~=3.4.0; python_version == "3.10"',
+            'pendulum==1.2.0',
       ],
       extras_require={
           'test': [
