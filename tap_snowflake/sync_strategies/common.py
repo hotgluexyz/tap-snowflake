@@ -239,6 +239,7 @@ def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version
                                                   row,
                                                   columns,
                                                   time_extracted)
+            LOGGER.info(f"record_message: {record_message}")
             singer.write_message(record_message)
 
             md_map = metadata.to_map(catalog_entry.metadata)
