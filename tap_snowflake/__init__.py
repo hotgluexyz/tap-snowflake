@@ -428,12 +428,14 @@ def get_streams(snowflake_conn, catalog, config, state):
 def write_schema_message(catalog_entry, bookmark_properties=None, snowflake_conn=None):
     key_properties = common.get_key_properties(catalog_entry, snowflake_conn)
 
-    singer.write_message(singer.SchemaMessage(
+    singer_schema = singer.SchemaMessage(
         stream=catalog_entry.stream,
         schema=catalog_entry.schema.to_dict(),
         key_properties=key_properties,
         bookmark_properties=bookmark_properties
-    ))
+    )
+    LOGGER.info(f"singer_schema: {singer_schema}")
+    singer.write_message(singer_schema)
 
 
 def do_sync_incremental(snowflake_conn, catalog_entry, state, columns, config={}):
