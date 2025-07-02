@@ -20,13 +20,9 @@ from singer.schema import Schema
 import tap_snowflake.sync_strategies.common as common
 import tap_snowflake.sync_strategies.full_table as full_table
 import tap_snowflake.sync_strategies.incremental as incremental
-from tap_snowflake.connection import SnowflakeConnection
+from tap_snowflake.connection import SnowflakeConnection, SHOW_COMMAND_MAX_ROWS
 
 LOGGER = singer.get_logger('tap_snowflake')
-
-# Max number of rows that a SHOW SCHEMAS|TABLES|COLUMNS can return.
-# If more than this number of rows returned then tap-snowflake will raise TooManyRecordsException
-SHOW_COMMAND_MAX_ROWS = 9999
 
 
 # Tone down snowflake connector logs noise
@@ -117,7 +113,7 @@ def create_column_metadata(cols):
     return metadata.to_list(mdata)
 
 
-def get_table_columns(snowflake_conn, tables):
+def get_table_columns(snowflake_conn: SnowflakeConnection, tables: list):
     """Get column definitions of a list of tables
 
        It's using SHOW commands instead of INFORMATION_SCHEMA views because information_schemas views are slow
@@ -143,30 +139,7 @@ def get_table_columns(snowflake_conn, tables):
         show_columns = f'SHOW COLUMNS IN TABLE {table}'
 
         # Convert output of SHOW commands to tables and use SQL joins to get every required information
-        select = """
-            WITH
-              show_columns  AS (SELECT * FROM TABLE(RESULT_SCAN(%(LAST_QID)s)))
-            SELECT show_columns."database_name"     AS table_catalog
-                  ,show_columns."schema_name"       AS table_schema
-                  ,show_columns."table_name"        AS table_name
-                  ,show_columns."column_name"       AS column_name
-                  -- ----------------------------------------------------------------------------------------
-                  -- Character and numeric columns display their generic data type rather than their defined
-                  -- data type (i.e. TEXT for all character types, FIXED for all fixed-point numeric types,
-                  -- and REAL for all floating-point numeric types).
-                  --
-                  -- Further info at https://docs.snowflake.net/manuals/sql-reference/sql/show-columns.html
-                  -- ----------------------------------------------------------------------------------------
-                  ,CASE PARSE_JSON(show_columns."data_type"):type::varchar
-                     WHEN 'FIXED' THEN 'NUMBER'
-                     WHEN 'REAL'  THEN 'FLOAT'
-                     ELSE PARSE_JSON("data_type"):type::varchar
-                   END data_type
-                  ,PARSE_JSON(show_columns."data_type"):length::number      AS character_maximum_length
-                  ,PARSE_JSON(show_columns."data_type"):precision::number   AS numeric_precision
-                  ,PARSE_JSON(show_columns."data_type"):scale::number       AS numeric_scale
-              FROM show_columns
-        """
+        select = snowflake_conn.get_data_type_query()
         queries.extend([show_columns, select])
 
         # Run everything in one transaction
@@ -176,18 +149,34 @@ def get_table_columns(snowflake_conn, tables):
     return table_columns
 
 
-def discover_catalog(snowflake_conn, config):
-    """Returns a Catalog describing the structure of the database."""
-    tables = None
+def get_tables(snowflake_conn: SnowflakeConnection, config: dict, get_query_result=False):
     if config.get('tables'):
         tables = config.get('tables').split(',')
-    elif config.get('table_selection'):
+        return tables
+
+    if config.get('table_selection'):
         dbname = common.escape(config.get('dbname'))
         schema = common.escape(config.get('schema'))
-        tables = config.get('table_selection')
-        # we need to build it up database.schema.table
-        tables = [f"{dbname}.{schema}.{common.escape(t.get('name'))}" for t in tables]
+        tables = [f"{dbname}.{schema}.{common.escape(t.get('name'))}" for t in config.get('table_selection')]
+        return tables
+    
+    if config.get('queries'):
+        temporary_tables = []
+        for query_info in config.get('queries'):
+            query = query_info.get('query')
+            table_name = query_info.get('name')
+            replication_key_field = query_info.get('replication_key')
+            start_date = config.get('start_date')
+            replication_key_condition = f"{replication_key_field} > '{start_date}'" if start_date else "1=1"
+            query = query.format(replication_key_condition = replication_key_condition)
+            temporary_tables.append(snowflake_conn.create_table(table_name, query, limit_query=not get_query_result))
+        tables = temporary_tables
+        return tables
+    
 
+def discover_catalog(snowflake_conn: SnowflakeConnection, config: dict, get_query_result=False):
+    """Returns a Catalog describing the structure of the database."""
+    tables = get_tables(snowflake_conn, config, get_query_result)
     
     # confirm warehouse exists and is active
     warehouses = snowflake_conn.query("SHOW WAREHOUSES;")
@@ -254,15 +243,28 @@ def discover_catalog(snowflake_conn, config):
             replication_key = None
             key_properties = None
             replication_method = "FULL_TABLE"
-            table_config_data = [table for table in config.get("table_selection", []) if table.get("name") == table_name]
-            if table_config_data:
-                table_config_data = table_config_data[0]
-                replication_key = table_config_data.get("replication_key")
+            table_selection_config_data = [table for table in config.get("table_selection", []) if table.get("name") == table_name]
+            query_config_data = [query for query in config.get("queries", []) if query.get("name").lower() == table_name.lower()]
+            if table_selection_config_data:
+                table_selection_config_data = table_selection_config_data[0]
+                replication_key = table_selection_config_data.get("replication_key")
                 if replication_key:
                     replication_method = "INCREMENTAL"
-                key_properties = table_config_data.get("primary_key")
+                key_properties = table_selection_config_data.get("primary_key")
                 if key_properties and isinstance(key_properties, str):
                     key_properties = [key_properties]
+            elif query_config_data:
+                query_config_data = query_config_data[0]
+                replication_key = query_config_data.get("replication_key")
+                key_properties = []
+                if replication_key:
+                    replication_method = "INCREMENTAL"
+                    key_properties.append(replication_key)
+                primary_key = query_config_data.get("primary_key")
+                if primary_key and isinstance(primary_key, str):
+                    key_properties.append(primary_key)
+                if not key_properties:
+                    key_properties = None
             else:
                 LOGGER.info(f"No config data found for table {table_name}, primary key and replication key not set.")
 
@@ -277,12 +279,16 @@ def discover_catalog(snowflake_conn, config):
                 replication_method=replication_method)
 
             entries.append(entry)
-
-    return Catalog(entries)
+    
+    temporary_tables = tables if config.get('queries') else None
+    return Catalog(entries), temporary_tables
 
 
 def do_discover(snowflake_conn, config):
-    discover_catalog(snowflake_conn, config).dump()
+    catalog, temporary_tables = discover_catalog(snowflake_conn, config)
+    if temporary_tables:
+        snowflake_conn.drop_temporary_tables_if_exists(temporary_tables)
+    catalog.dump()
 
 
 # pylint: disable=fixme
@@ -338,7 +344,7 @@ def resolve_catalog(discovered_catalog, streams_to_sync):
     # with the same stream in the discovered catalog.
     for catalog_entry in streams_to_sync:
         catalog_metadata = metadata.to_map(catalog_entry.metadata)
-        replication_key = catalog_metadata.get((), {}).get('replication-key')
+        replication_key = catalog_entry.to_dict().get('replication_key')
 
         discovered_table = discovered_catalog.get_stream(catalog_entry.tap_stream_id)
         database_name = common.get_database_name(catalog_entry)
@@ -353,17 +359,19 @@ def resolve_catalog(discovered_catalog, streams_to_sync):
 
         # These are the columns we need to select
         columns = desired_columns(selected, discovered_table.schema)
-
+        replication_method = catalog_entry.to_dict().get('replication_method')
         result.streams.append(CatalogEntry(
             tap_stream_id=catalog_entry.tap_stream_id,
             metadata=catalog_entry.metadata,
             stream=catalog_entry.tap_stream_id,
             table=catalog_entry.table,
+            replication_key=replication_key,
             schema=Schema(
                 type='object',
                 properties={col: discovered_table.schema.properties[col]
                             for col in columns}
-            )
+            ),
+            replication_method=replication_method,
         ))
 
     return result
@@ -387,7 +395,7 @@ def get_streams(snowflake_conn, catalog, config, state):
       2. any streams that do not have state
       3. any streams that do not have a replication method of LOG_BASED
     """
-    discovered = discover_catalog(snowflake_conn, config)
+    discovered, temporary_tables = discover_catalog(snowflake_conn, config, get_query_result=True)
 
     # Filter catalog to include only selected streams
     # pylint: disable=unnecessary-lambda
@@ -422,7 +430,7 @@ def get_streams(snowflake_conn, catalog, config, state):
         # prioritize streams that have not been processed
         streams_to_sync = ordered_streams
 
-    return resolve_catalog(discovered, streams_to_sync)
+    return resolve_catalog(discovered, streams_to_sync), temporary_tables
 
 
 def write_schema_message(catalog_entry, bookmark_properties=None, snowflake_conn=None):
@@ -439,16 +447,15 @@ def write_schema_message(catalog_entry, bookmark_properties=None, snowflake_conn
 def do_sync_incremental(snowflake_conn, catalog_entry, state, columns, config={}):
     LOGGER.info('Stream %s is using incremental replication', catalog_entry.stream)
 
-    md_map = metadata.to_map(catalog_entry.metadata)
-    replication_key = md_map.get((), {}).get('replication-key')
+    replication_key = catalog_entry.to_dict().get('replication_key')
 
     config = snowflake_conn.connection_config
     if config.get("table_selection"):
         tables = config['table_selection']
-        table = [x for x in tables if x.get('name') == catalog_entry.table]
+        table = next((x for x in tables if x.get('name') == catalog_entry.table), None)
 
-        if len(table) > 0:
-            replication_key = table[0].get('replication_key')
+        if table:
+            replication_key = table.get('replication_key')
 
     if not replication_key:
         raise Exception(f'Cannot use INCREMENTAL replication for table ({catalog_entry.stream}) without a replication '
@@ -498,7 +505,7 @@ def sync_streams(snowflake_conn, catalog, state, config={}):
 
         md_map = metadata.to_map(catalog_entry.metadata)
 
-        replication_method = snowflake_conn.connection_config.get("replication_method") or md_map.get((), {}).get('replication-method', "")
+        replication_method = snowflake_conn.connection_config.get("replication_method") or catalog_entry.to_dict().get('replication_method')
 
         database_name = common.get_database_name(catalog_entry, snowflake_conn)
         schema_name = common.get_schema_name(catalog_entry, snowflake_conn)
@@ -506,7 +513,6 @@ def sync_streams(snowflake_conn, catalog, state, config={}):
         with metrics.job_timer('sync_table') as timer:
             timer.tags['database'] = database_name
             timer.tags['table'] = catalog_entry.table
-
             LOGGER.info('Beginning to sync %s.%s.%s', database_name, schema_name, catalog_entry.table)
 
             if replication_method.lower() == 'incremental':
@@ -519,8 +525,10 @@ def sync_streams(snowflake_conn, catalog, state, config={}):
 
 
 def do_sync(snowflake_conn, config, catalog, state):
-    catalog = get_streams(snowflake_conn, catalog, config, state)
-    sync_streams(snowflake_conn, catalog, state, config)
+    catalog, temporary_tables = get_streams(snowflake_conn, catalog, config, state)
+    sync_streams(snowflake_conn, catalog, state)
+    if temporary_tables:
+        snowflake_conn.drop_temporary_tables_if_exists(temporary_tables)
 
 
 def main_impl():
