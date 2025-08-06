@@ -190,6 +190,25 @@ def whitelist_bookmark_keys(bookmark_key_set, tap_stream_id, state):
 
 
 def clean_rep_key_value(rep_key_value):
+    # If the value is numeric (int, float, or numeric string), return it as-is
+    if isinstance(rep_key_value, (int, float)):
+        return rep_key_value
+    
+    # If it's a string that represents a number, return it as-is
+    if isinstance(rep_key_value, str):
+        try:
+            # Try to parse as int first, then float
+            try:
+                int(rep_key_value)
+                return rep_key_value
+            except ValueError:
+                float(rep_key_value)
+                return rep_key_value
+        except ValueError:
+            # Not a number, continue with datetime processing
+            pass
+    
+    # Original datetime processing logic
     match = re.match(r'^(.*?)([\+\-]\d{2}:\d{2})([\+\-].*)?$', rep_key_value)
 
     if match:
