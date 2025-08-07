@@ -197,13 +197,8 @@ def clean_rep_key_value(rep_key_value):
     # If it's a string that represents a number, return it as-is
     if isinstance(rep_key_value, str):
         try:
-            # Try to parse as int first, then float
-            try:
-                int(rep_key_value)
-                return rep_key_value
-            except ValueError:
-                float(rep_key_value)
-                return rep_key_value
+            float(rep_key_value)
+            return rep_key_value
         except ValueError:
             # Not a number, continue with datetime processing
             pass
