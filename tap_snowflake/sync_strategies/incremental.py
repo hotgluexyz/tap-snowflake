@@ -32,13 +32,21 @@ def sync_table(snowflake_conn, catalog_entry, state, columns, config={}):
                                                 'replication_key')
 
     replication_key_value = config.get("start_date")
-    LOGGER.info(f"Got start_date from config {replication_key_value}")
+    
+    # For non-datetime replication keys, check if table has a start_value configured
+    if config.get("table_selection"):
+        tables = config['table_selection']
+        table = [x for x in tables if x.get('name') == catalog_entry.table]
+        if len(table) > 0 and table[0].get('start_value') is not None:
+            replication_key_value = table[0]['start_value']
+            
+    LOGGER.info(f"Got start value from config {replication_key_value}")
 
     if replication_key_metadata == replication_key_state:
         replication_key_value = singer.get_bookmark(state,
                                                     catalog_entry.tap_stream_id,
                                                     'replication_key_value')
-        LOGGER.info(f"Got start_date from state {replication_key_value}")
+        LOGGER.info(f"Got start value from state {replication_key_value}")
     else:
         state = singer.write_bookmark(state,
                                     catalog_entry.tap_stream_id,
@@ -66,8 +74,26 @@ def sync_table(snowflake_conn, catalog_entry, state, columns, config={}):
         with open_conn.cursor() as cur:
             select_sql = common.generate_select_sql(catalog_entry, columns, snowflake_conn)
             params = {}
+            if replication_key_value is not None:
+                # Handle datetime replication keys
+                if catalog_entry.schema.properties[replication_key_metadata].format == 'date-time':
+                    replication_key_value = pendulum.parse(replication_key_value)
 
-            select_sql = common.get_incremental_sql(catalog_entry, select_sql, replication_key_value, replication_key_metadata)
+                    # For datetime, use quotes in SQL
+                    select_sql += ' WHERE "{}" > \'{}\' ORDER BY "{}" ASC'.format(
+                        replication_key_metadata,
+                        replication_key_value,
+                        replication_key_metadata)
+                else:
+                    # Handle integer/numeric replication keys (like BIGINT)
+                    # For numeric values, don't use quotes in SQL
+                    select_sql += ' WHERE "{}" > {} ORDER BY "{}" ASC'.format(
+                        replication_key_metadata,
+                        replication_key_value,
+                        replication_key_metadata)
+            elif replication_key_metadata is not None:
+                select_sql += ' ORDER BY "{}" ASC'.format(replication_key_metadata)
+
             common.sync_query(cur,
                             catalog_entry,
                             state,
