@@ -11,6 +11,9 @@ import singer.metrics as metrics
 from singer import metadata
 from singer import utils
 from pendulum import parse
+import os
+import json
+import pathlib
 
 LOGGER = singer.get_logger('tap_snowflake')
 
@@ -210,6 +213,89 @@ def clean_rep_key_value(rep_key_value):
 
     return cleaned_timestamp_str
 
+def get_incremental_sql(catalog_entry, select_sql, replication_key_value, replication_key_metadata):
+    if replication_key_value is not None:
+        if catalog_entry.schema.properties[replication_key_metadata].format == 'date-time':
+            replication_key_value = pendulum.parse(replication_key_value)
+
+        # pylint: disable=duplicate-string-formatting-argument
+        select_sql += ' WHERE "{}" > \'{}\' ORDER BY "{}" ASC'.format(
+            replication_key_metadata,
+            replication_key_value,
+            replication_key_metadata)
+
+    elif replication_key_metadata is not None:
+        select_sql += ' ORDER BY "{}" ASC'.format(replication_key_metadata)
+    
+    return select_sql
+
+def get_column_names(cursor, config, table_name):
+    """Get column names from the table"""
+    # Query to get column names
+    column_query = f"""
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = '{config['schema']}' 
+    AND TABLE_NAME = '{table_name}'
+    AND TABLE_CATALOG = '{config['dbname']}'
+    ORDER BY ORDINAL_POSITION;
+    """
+    
+    cursor.execute(column_query)
+    column_names = [row[0] for row in cursor]
+    return column_names
+
+def download_data_as_files(cursor, columns, config, catalog_entry, incremental_sql=""):
+    """Download data as files"""
+
+    aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
+    aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    aws_bucket = os.environ.get("ENV_ID")
+    job_root = os.environ.get("JOB_ID")
+    file_name = f"{config.get('dbname')}_{config.get('schema')}_{catalog_entry.table}"
+    aws_export_path = f"s3://{aws_bucket}/{job_root}"
+    max_file_size = 5368709120 # 512MB
+    local_output_dir = "../.secrets" #f"/home/hotglue/{job_root}/sync-output"
+
+    with cursor.connect_with_backoff() as open_conn:
+        with open_conn.cursor() as cur:
+            available_column_names = get_column_names(cur, config, catalog_entry.table)
+            query_column_names = [col for col in available_column_names if col in columns]
+
+            LOGGER.info(f"Downloading file {file_name} to S3 {aws_export_path}")
+
+            query = f"""
+            COPY INTO '{aws_export_path}/{file_name}.parquet'
+            FROM (
+                SELECT 
+                    {', '.join(query_column_names)},
+                    '{catalog_entry.table}' AS table_name,
+                    '{config['dbname']}' AS database_name,
+                    '{config['schema']}' AS schema_name,
+                    ARRAY_CONSTRUCT(
+                        {', '.join(query_column_names)}
+                    ) AS column_names
+                FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
+                {incremental_sql}
+            )
+            FILE_FORMAT = (TYPE = PARQUET COMPRESSION = SNAPPY)
+            CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}')
+            OVERWRITE = TRUE
+            HEADER = TRUE
+            SINGLE = TRUE
+            MAX_FILE_SIZE = {max_file_size};
+            """ 
+            cur.execute(query)
+            LOGGER.info(f"File downloaded successfully to S3")
+    
+            # get rows len to add to the job metrics
+            LOGGER.info(f"Getting job metrics for {file_name}")
+            count_query = f"""
+            SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
+            """
+            cur.execute(count_query)
+            rowcount = cur._total_rowcount
+            update_job_metrics(file_name, rowcount, local_output_dir)
 
 def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version, params, replication_method=None):
     """..."""
@@ -283,3 +369,49 @@ def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version
             row = cursor.fetchone()
 
     singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
+
+def update_job_metrics(stream_name: str, record_count: int, output_dir: str):
+    """
+    Update metrics for a running job by tracking record counts per stream.
+
+    This function maintains a JSON file that keeps track of the number of records
+    processed for each stream during a job execution. The metrics are stored in
+    a 'job_metrics.json' file in the specified folder path.
+
+    Args:
+        stream_name (str): The name of the stream being processed
+        record_count (int): Number of records processed in the current batch
+        output_dir (str): Folder path to store the job metrics
+
+    Examples:
+        >>> update_job_metrics("customers", 1000, "job_123")
+        # Updates job_metrics.json with:
+        # {
+        #   "recordCount": {
+        #     "customers": 1000
+        #   }
+        # }
+    """
+    job_metrics_path = os.path.expanduser(os.path.join(output_dir, "job_metrics.json"))
+
+    if not os.path.isfile(job_metrics_path):
+        pathlib.Path(job_metrics_path).touch()
+
+    with open(job_metrics_path, "r+") as f:
+        content = dict()
+
+        try:
+            content = json.loads(f.read())
+        except:
+            pass
+
+        if not content.get("recordCount"):
+            content["recordCount"] = dict()
+
+        content["recordCount"][stream_name] = (
+            content["recordCount"].get(stream_name, 0) + record_count
+        )
+
+        f.seek(0)
+        LOGGER.info(f"Updating job metrics for {stream_name} with {record_count} records")
+        f.write(json.dumps(content))
