@@ -227,22 +227,6 @@ def clean_rep_key_value(rep_key_value):
 
     return cleaned_timestamp_str
 
-def get_incremental_sql(catalog_entry, select_sql, replication_key_value, replication_key_metadata):
-    if replication_key_value is not None:
-        if catalog_entry.schema.properties[replication_key_metadata].format == 'date-time':
-            replication_key_value = pendulum.parse(replication_key_value)
-
-        # pylint: disable=duplicate-string-formatting-argument
-        select_sql += ' WHERE "{}" > \'{}\' ORDER BY "{}" ASC'.format(
-            replication_key_metadata,
-            replication_key_value,
-            replication_key_metadata)
-
-    elif replication_key_metadata is not None:
-        select_sql += ' ORDER BY "{}" ASC'.format(replication_key_metadata)
-    
-    return select_sql
-
 def get_column_names(cursor, config, table_name):
     """Get column names from the table"""
     # Query to get column names
