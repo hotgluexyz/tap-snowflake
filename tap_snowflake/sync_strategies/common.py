@@ -252,8 +252,8 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
     job_root = os.environ.get("JOB_ID")
     file_name = f"{config.get('dbname')}_{config.get('schema')}_{catalog_entry.table}"
     aws_export_path = f"s3://{aws_bucket}/{job_root}"
-    max_file_size = 5368709120 # 512MB
-    local_output_dir = "../.secrets" #f"/home/hotglue/{job_root}/sync-output"
+    max_file_size = 5368709120 # 5GB
+    local_output_dir = f"/home/hotglue/{job_root}/sync-output"
 
     with cursor.connect_with_backoff() as open_conn:
         with open_conn.cursor() as cur:
