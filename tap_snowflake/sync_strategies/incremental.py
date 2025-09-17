@@ -49,16 +49,16 @@ def sync_table(snowflake_conn, catalog_entry, state, columns, config={}):
         LOGGER.info(f"Got start value from state {replication_key_value}")
     else:
         state = singer.write_bookmark(state,
-                                      catalog_entry.tap_stream_id,
-                                      'replication_key',
-                                      replication_key_metadata)
+                                    catalog_entry.tap_stream_id,
+                                    'replication_key',
+                                    replication_key_metadata)
         state = singer.clear_bookmark(state, catalog_entry.tap_stream_id, 'replication_key_value')
 
     stream_version = common.get_stream_version(catalog_entry.tap_stream_id, state)
     state = singer.write_bookmark(state,
-                                  catalog_entry.tap_stream_id,
-                                  'version',
-                                  stream_version)
+                                catalog_entry.tap_stream_id,
+                                'version',
+                                stream_version)
 
     activate_version_message = singer.ActivateVersionMessage(
         stream=catalog_entry.stream,
@@ -74,7 +74,6 @@ def sync_table(snowflake_conn, catalog_entry, state, columns, config={}):
         with open_conn.cursor() as cur:
             select_sql = common.generate_select_sql(catalog_entry, columns, snowflake_conn)
             params = {}
-
             if replication_key_value is not None:
                 # Handle datetime replication keys
                 if catalog_entry.schema.properties[replication_key_metadata].format == 'date-time':
@@ -96,10 +95,10 @@ def sync_table(snowflake_conn, catalog_entry, state, columns, config={}):
                 select_sql += ' ORDER BY "{}" ASC'.format(replication_key_metadata)
 
             common.sync_query(cur,
-                              catalog_entry,
-                              state,
-                              select_sql,
-                              columns,
-                              stream_version,
-                              params,
-                              replication_method="INCREMENTAL")
+                            catalog_entry,
+                            state,
+                            select_sql,
+                            columns,
+                            stream_version,
+                            params,
+                            replication_method="INCREMENTAL")
