@@ -231,7 +231,7 @@ def get_column_names(cursor, config, table_name):
     """Get column names from the table"""
     # Query to get column names
     column_query = f"""
-    SELECT COLUMN_NAME
+    SELECT COLUMN_NAME, DATA_TYPE
     FROM INFORMATION_SCHEMA.COLUMNS 
     WHERE TABLE_SCHEMA = '{config['schema']}' 
     AND TABLE_NAME = '{table_name}'
@@ -239,9 +239,23 @@ def get_column_names(cursor, config, table_name):
     ORDER BY ORDINAL_POSITION;
     """
     
-    cursor.execute(column_query)
-    column_names = [row[0] for row in cursor]
-    return column_names
+    columns = cursor.execute(column_query)
+    columns = columns.fetchall()
+    columns_names = [row[0] for row in columns]
+    column_types = {row[0]: row[1] for row in columns}
+    return columns_names, column_types
+
+def cast_column_types(column_types):
+    """Cast column types to the correct type"""
+    formatted_column_names = []
+    for column_name, column_type in column_types.items():
+        if column_type == 'TIMESTAMP_LTZ' or column_type == 'TIMESTAMP_TZ':
+            formatted_column_names.append(
+                f"CAST(CONVERT_TIMEZONE('UTC', {column_name}) AS TIMESTAMP_NTZ) AS {column_name}"
+            )        
+        else:
+            formatted_column_names.append(column_name)
+    return formatted_column_names
 
 def download_data_as_files(cursor, columns, config, catalog_entry, incremental_sql=""):
     """Download data as files"""
@@ -253,20 +267,23 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
     file_name = f"{config.get('dbname')}_{config.get('schema')}_{catalog_entry.table}"
     aws_export_path = f"s3://{aws_bucket}/{job_root}"
     max_file_size = 5368709120 # 5GB
-    local_output_dir = f"/home/hotglue/{job_root}/sync-output"
+    local_output_dir = f"/home/hotglue/{job_root}/sync-output" if job_root else f"../.secrets"
 
     with cursor.connect_with_backoff() as open_conn:
         with open_conn.cursor() as cur:
-            available_column_names = get_column_names(cur, config, catalog_entry.table)
+            available_column_names, column_types = get_column_names(cur, config, catalog_entry.table)
             query_column_names = [col for col in available_column_names if col in columns]
+            formatted_column_names = []
 
             LOGGER.info(f"Downloading file {file_name} to S3 {aws_export_path}")
+            
+            formatted_column_names = cast_column_types(column_types)
 
             query = f"""
             COPY INTO '{aws_export_path}/{file_name}.parquet'
             FROM (
                 SELECT 
-                    {', '.join(query_column_names)},
+                    {', '.join(formatted_column_names)},
                     '{catalog_entry.table}' AS table_name,
                     '{config['dbname']}' AS database_name,
                     '{config['schema']}' AS schema_name,
