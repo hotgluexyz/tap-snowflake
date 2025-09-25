@@ -238,12 +238,11 @@ def get_column_names(cursor, config, table_name):
     AND TABLE_CATALOG = '{config['dbname']}'
     ORDER BY ORDINAL_POSITION;
     """
-    
+    LOGGER.info(f"Column query: {column_query}")
     columns = cursor.execute(column_query)
     columns = columns.fetchall()
-    columns_names = [row[0] for row in columns]
     column_types = {row[0]: row[1] for row in columns}
-    return columns_names, column_types
+    return column_types
 
 def cast_column_types(column_types, selected_columns):
     """Cast column types to the correct type"""
@@ -264,17 +263,18 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
 
     aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
     aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+    aws_session = os.environ.get("AWS_SESSION_TOKEN")
     aws_bucket = os.environ.get("ENV_ID")
-    job_root = os.environ.get("JOB_ID")
+    job_root = os.environ.get("JOB_ROOT")
+    job_id = os.environ.get("JOB_ID", "")
     file_name = f"{config.get('dbname')}_{config.get('schema')}_{catalog_entry.table}"
-    aws_export_path = f"s3://{aws_bucket}/{job_root}"
+    aws_export_path = f"s3://{aws_bucket}/{job_root}/sync-output"
     max_file_size = 5368709120 # 5GB
-    local_output_dir = f"/home/hotglue/{job_root}/sync-output" if job_root else f"../.secrets"
+    local_output_dir = f"/home/hotglue/{job_id}/sync-output" if job_root else f"../.secrets"
 
     with cursor.connect_with_backoff() as open_conn:
         with open_conn.cursor() as cur:
-            available_column_names, column_types = get_column_names(cur, config, catalog_entry.table)
-            query_column_names = [col for col in available_column_names if col in columns]
+            column_types = get_column_names(cur, config, catalog_entry.table)
             formatted_column_names = []
 
             LOGGER.info(f"Downloading file {file_name} to S3 {aws_export_path}")
@@ -290,7 +290,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
                 {incremental_sql}
             )
             FILE_FORMAT = (TYPE = PARQUET COMPRESSION = SNAPPY)
-            CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}')
+            CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}' AWS_TOKEN='{aws_session}')
             OVERWRITE = TRUE
             HEADER = TRUE
             SINGLE = TRUE
