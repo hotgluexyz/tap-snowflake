@@ -245,10 +245,12 @@ def get_column_names(cursor, config, table_name):
     column_types = {row[0]: row[1] for row in columns}
     return columns_names, column_types
 
-def cast_column_types(column_types):
+def cast_column_types(column_types, selected_columns):
     """Cast column types to the correct type"""
     formatted_column_names = []
     for column_name, column_type in column_types.items():
+        if column_name not in selected_columns:
+            continue
         if column_type == 'TIMESTAMP_LTZ' or column_type == 'TIMESTAMP_TZ':
             formatted_column_names.append(
                 f"CAST(CONVERT_TIMEZONE('UTC', {column_name}) AS TIMESTAMP_NTZ) AS {column_name}"
@@ -277,19 +279,13 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
 
             LOGGER.info(f"Downloading file {file_name} to S3 {aws_export_path}")
             
-            formatted_column_names = cast_column_types(column_types)
+            formatted_column_names = cast_column_types(column_types, columns)
 
             query = f"""
             COPY INTO '{aws_export_path}/{file_name}.parquet'
             FROM (
                 SELECT 
-                    {', '.join(formatted_column_names)},
-                    '{catalog_entry.table}' AS table_name,
-                    '{config['dbname']}' AS database_name,
-                    '{config['schema']}' AS schema_name,
-                    ARRAY_CONSTRUCT(
-                        {', '.join(query_column_names)}
-                    ) AS column_names
+                    {', '.join(formatted_column_names)}
                 FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
                 {incremental_sql}
             )
