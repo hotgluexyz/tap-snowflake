@@ -261,11 +261,11 @@ def cast_column_types(column_types, selected_columns):
 def download_data_as_files(cursor, columns, config, catalog_entry, incremental_sql=""):
     """Download data as files"""
 
-    aws_key = os.environ.get("AWS_ACCESS_KEY_ID", "ASIAYOW7M4CJXFOYKG4X")
-    aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "n72Uk802aHVXbm46BctajjvNEmnSxhIacyrr0sDf")
+    aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
+    aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
     aws_session = os.environ.get("AWS_SESSION_TOKEN")
-    aws_bucket = os.environ.get("ENV_ID", "dev.hotglue.testcompany.com")
-    job_root = os.environ.get("JOB_ROOT", "")
+    aws_bucket = os.environ.get("ENV_ID")
+    job_root = os.environ.get("JOB_ROOT")
     job_id = os.environ.get("JOB_ID", "")
     file_name = f"{config.get('dbname')}_{config.get('schema')}_{catalog_entry.table}"
     aws_export_path = f"s3://{aws_bucket}/{job_root}/sync-output"
