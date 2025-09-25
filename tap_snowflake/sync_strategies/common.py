@@ -238,12 +238,11 @@ def get_column_names(cursor, config, table_name):
     AND TABLE_CATALOG = '{config['dbname']}'
     ORDER BY ORDINAL_POSITION;
     """
-    
+    LOGGER.info(f"Column query: {column_query}")
     columns = cursor.execute(column_query)
     columns = columns.fetchall()
-    columns_names = [row[0] for row in columns]
     column_types = {row[0]: row[1] for row in columns}
-    return columns_names, column_types
+    return column_types
 
 def cast_column_types(column_types, selected_columns):
     """Cast column types to the correct type"""
@@ -271,10 +270,11 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
     max_file_size = 5368709120 # 5GB
     local_output_dir = f"/home/hotglue/{job_root}/sync-output" if job_root else f"../.secrets"
 
+    LOGGER.info(f"Key: {aws_key}, other key: {aws_secret_key}, bucket: {aws_bucket}, job_root: {job_root}, file_name: {file_name}, aws_export_path: {aws_export_path}, max_file_size: {max_file_size}, local_output_dir: {local_output_dir}")
+
     with cursor.connect_with_backoff() as open_conn:
         with open_conn.cursor() as cur:
-            available_column_names, column_types = get_column_names(cur, config, catalog_entry.table)
-            query_column_names = [col for col in available_column_names if col in columns]
+            column_types = get_column_names(cur, config, catalog_entry.table)
             formatted_column_names = []
 
             LOGGER.info(f"Downloading file {file_name} to S3 {aws_export_path}")
