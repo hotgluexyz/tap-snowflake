@@ -264,7 +264,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
     aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
     aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
     aws_bucket = os.environ.get("ENV_ID")
-    job_root = os.environ.get("JOB_ID")
+    job_root = os.environ.get("JOB_ROOT")
     file_name = f"{config.get('dbname')}_{config.get('schema')}_{catalog_entry.table}"
     aws_export_path = f"s3://{aws_bucket}/{job_root}"
     max_file_size = 5368709120 # 5GB
