@@ -272,8 +272,6 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
     max_file_size = 5368709120 # 5GB
     local_output_dir = f"/home/hotglue/{job_id}/sync-output" if job_root else f"../.secrets"
 
-    LOGGER.info(f"Key: {aws_key}, other key: {aws_secret_key}, bucket: {aws_bucket}, job_root: {job_root}, file_name: {file_name}, aws_export_path: {aws_export_path}, max_file_size: {max_file_size}, local_output_dir: {local_output_dir}")
-
     with cursor.connect_with_backoff() as open_conn:
         with open_conn.cursor() as cur:
             column_types = get_column_names(cur, config, catalog_entry.table)
