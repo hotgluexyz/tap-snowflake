@@ -310,7 +310,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
 
             # download the file from s3 to the local output directory
             LOGGER.info(f"Downloading file {file_name} to local output directory {local_output_dir}")
-            os.system(f"aws s3 cp {aws_export_path}/{file_name}.parquet {local_output_dir}")
+            os.system(f"aws s3 cp {aws_export_path}/{file_name}.parquet {local_output_dir} > /dev/null 2>&1")
             LOGGER.info(f"File downloaded successfully to local output directory")
 
 def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version, params, replication_method=None):
