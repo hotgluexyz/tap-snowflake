@@ -46,7 +46,7 @@ REQUIRED_CONFIG_KEYS = [
     'account',
     'dbname',
     'warehouse',
-    'tables'
+    # 'tables'
 ]
 
 # Snowflake data types
@@ -77,9 +77,9 @@ def schema_for_column(c):
     elif data_type in NUMBER_TYPES:
         result.type = ['null', 'number']
 
-    elif data_type in STRING_TYPES:
+    elif data_type in STRING_TYPES or data_type in ["array", "object", "variant"]:
         result.type = ['null', 'string']
-        result.maxLength = c.character_maximum_length
+        # result.maxLength = c.character_maximum_length
 
     elif data_type in DATETIME_TYPES:
         result.type = ['null', 'string']
@@ -178,7 +178,23 @@ def get_table_columns(snowflake_conn, tables):
 
 def discover_catalog(snowflake_conn, config):
     """Returns a Catalog describing the structure of the database."""
-    tables = config.get('tables').split(',')
+    tables = None
+    if config.get('tables'):
+        tables = config.get('tables').split(',')
+    elif config.get('table_selection'):
+        dbname = common.escape(config.get('dbname'))
+        schema = common.escape(config.get('schema'))
+        tables = config.get('table_selection')
+        # we need to build it up database.schema.table
+        tables = [f"{dbname}.{schema}.{common.escape(t.get('name'))}" for t in tables]
+
+    
+    # confirm warehouse exists and is active
+    warehouses = snowflake_conn.query("SHOW WAREHOUSES;")
+    warehouse = [wh for wh in warehouses if wh.get("name") == config.get("warehouse")]
+    if not warehouse:
+        raise Exception(f"Warehouse {config.get('warehouse')} doesn't exist")
+
     sql_columns = get_table_columns(snowflake_conn, tables)
 
     table_info = {}
@@ -234,12 +250,31 @@ def discover_catalog(snowflake_conn, config):
             md_map = metadata.write(md_map, (), 'row-count', row_count)
             md_map = metadata.write(md_map, (), 'is-view', is_view)
 
+            # get pk and rep_key for tables
+            replication_key = None
+            key_properties = None
+            replication_method = "FULL_TABLE"
+            table_config_data = [table for table in config.get("table_selection", []) if table.get("name") == table_name]
+            if table_config_data:
+                table_config_data = table_config_data[0]
+                replication_key = table_config_data.get("replication_key")
+                if replication_key:
+                    replication_method = "INCREMENTAL"
+                key_properties = table_config_data.get("primary_key")
+                if key_properties and isinstance(key_properties, str):
+                    key_properties = [key_properties]
+            else:
+                LOGGER.info(f"No config data found for table {table_name}, primary key and replication key not set.")
+
             entry = CatalogEntry(
                 table=table_name,
                 stream=table_name,
                 metadata=metadata.to_list(md_map),
                 tap_stream_id=common.generate_tap_stream_id(table_catalog, table_schema, table_name),
-                schema=schema)
+                schema=schema,
+                replication_key=replication_key,
+                key_properties=key_properties,
+                replication_method=replication_method)
 
             entries.append(entry)
 
@@ -390,8 +425,8 @@ def get_streams(snowflake_conn, catalog, config, state):
     return resolve_catalog(discovered, streams_to_sync)
 
 
-def write_schema_message(catalog_entry, bookmark_properties=None):
-    key_properties = common.get_key_properties(catalog_entry)
+def write_schema_message(catalog_entry, bookmark_properties=None, snowflake_conn=None):
+    key_properties = common.get_key_properties(catalog_entry, snowflake_conn)
 
     singer.write_message(singer.SchemaMessage(
         stream=catalog_entry.stream,
@@ -401,32 +436,41 @@ def write_schema_message(catalog_entry, bookmark_properties=None):
     ))
 
 
-def do_sync_incremental(snowflake_conn, catalog_entry, state, columns):
+def do_sync_incremental(snowflake_conn, catalog_entry, state, columns, config={}):
     LOGGER.info('Stream %s is using incremental replication', catalog_entry.stream)
 
     md_map = metadata.to_map(catalog_entry.metadata)
     replication_key = md_map.get((), {}).get('replication-key')
+
+    config = snowflake_conn.connection_config
+    if config.get("table_selection"):
+        tables = config['table_selection']
+        table = [x for x in tables if x.get('name') == catalog_entry.table]
+
+        if len(table) > 0:
+            replication_key = table[0].get('replication_key')
 
     if not replication_key:
         raise Exception(f'Cannot use INCREMENTAL replication for table ({catalog_entry.stream}) without a replication '
                         f'key.')
 
     write_schema_message(catalog_entry=catalog_entry,
-                         bookmark_properties=[replication_key])
+                         bookmark_properties=[replication_key],
+                         snowflake_conn=snowflake_conn)
 
-    incremental.sync_table(snowflake_conn, catalog_entry, state, columns)
+    incremental.sync_table(snowflake_conn, catalog_entry, state, columns, config)
 
     singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
 
 
-def do_sync_full_table(snowflake_conn, catalog_entry, state, columns):
+def do_sync_full_table(snowflake_conn, catalog_entry, state, columns, config={}):
     LOGGER.info('Stream %s is using full table replication', catalog_entry.stream)
 
-    write_schema_message(catalog_entry)
+    write_schema_message(catalog_entry, snowflake_conn=snowflake_conn)
 
     stream_version = common.get_stream_version(catalog_entry.tap_stream_id, state)
 
-    full_table.sync_table(snowflake_conn, catalog_entry, state, columns, stream_version)
+    full_table.sync_table(snowflake_conn, catalog_entry, state, columns, stream_version, config)
 
     # Prefer initial_full_table_complete going forward
     singer.clear_bookmark(state, catalog_entry.tap_stream_id, 'version')
@@ -439,7 +483,7 @@ def do_sync_full_table(snowflake_conn, catalog_entry, state, columns):
     singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
 
 
-def sync_streams(snowflake_conn, catalog, state):
+def sync_streams(snowflake_conn, catalog, state, config={}):
     for catalog_entry in catalog.streams:
         columns = list(catalog_entry.schema.properties.keys())
 
@@ -454,10 +498,10 @@ def sync_streams(snowflake_conn, catalog, state):
 
         md_map = metadata.to_map(catalog_entry.metadata)
 
-        replication_method = md_map.get((), {}).get('replication-method')
+        replication_method = snowflake_conn.connection_config.get("replication_method") or md_map.get((), {}).get('replication-method', "")
 
-        database_name = common.get_database_name(catalog_entry)
-        schema_name = common.get_schema_name(catalog_entry)
+        database_name = common.get_database_name(catalog_entry, snowflake_conn)
+        schema_name = common.get_schema_name(catalog_entry, snowflake_conn)
 
         with metrics.job_timer('sync_table') as timer:
             timer.tags['database'] = database_name
@@ -465,10 +509,10 @@ def sync_streams(snowflake_conn, catalog, state):
 
             LOGGER.info('Beginning to sync %s.%s.%s', database_name, schema_name, catalog_entry.table)
 
-            if replication_method == 'INCREMENTAL':
-                do_sync_incremental(snowflake_conn, catalog_entry, state, columns)
+            if replication_method.lower() == 'incremental':
+                do_sync_incremental(snowflake_conn, catalog_entry, state, columns, config)
             else:
-                do_sync_full_table(snowflake_conn, catalog_entry, state, columns)
+                do_sync_full_table(snowflake_conn, catalog_entry, state, columns, config)
 
     state = singer.set_currently_syncing(state, None)
     singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
@@ -476,7 +520,7 @@ def sync_streams(snowflake_conn, catalog, state):
 
 def do_sync(snowflake_conn, config, catalog, state):
     catalog = get_streams(snowflake_conn, catalog, config, state)
-    sync_streams(snowflake_conn, catalog, state)
+    sync_streams(snowflake_conn, catalog, state, config)
 
 
 def main_impl():

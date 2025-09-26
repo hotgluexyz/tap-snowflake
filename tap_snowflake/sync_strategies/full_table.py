@@ -69,46 +69,51 @@ def generate_pk_clause(catalog_entry, state):
     return sql
 
 
-def sync_table(snowflake_conn, catalog_entry, state, columns, stream_version):
+def sync_table(snowflake_conn, catalog_entry, state, columns, stream_version, config={}):
     """Sync table with FULL_TABLE"""
-    common.whitelist_bookmark_keys(BOOKMARK_KEYS, catalog_entry.tap_stream_id, state)
 
-    bookmark = state.get('bookmarks', {}).get(catalog_entry.tap_stream_id, {})
-    version_exists = True if 'version' in bookmark else False
+    if config.get("download_data_as_files"):
+        common.download_data_as_files(snowflake_conn, columns, config, catalog_entry)
 
-    initial_full_table_complete = singer.get_bookmark(state,
-                                                      catalog_entry.tap_stream_id,
-                                                      'initial_full_table_complete')
+    else:
+        common.whitelist_bookmark_keys(BOOKMARK_KEYS, catalog_entry.tap_stream_id, state)
 
-    state_version = singer.get_bookmark(state,
-                                        catalog_entry.tap_stream_id,
-                                        'version')
+        bookmark = state.get('bookmarks', {}).get(catalog_entry.tap_stream_id, {})
+        version_exists = True if 'version' in bookmark else False
 
-    activate_version_message = singer.ActivateVersionMessage(
-        stream=catalog_entry.stream,
-        version=stream_version
-    )
+        initial_full_table_complete = singer.get_bookmark(state,
+                                                        catalog_entry.tap_stream_id,
+                                                        'initial_full_table_complete')
 
-    # For the initial replication, emit an ACTIVATE_VERSION message
-    # at the beginning so the records show up right away.
-    if not initial_full_table_complete and not (version_exists and state_version is None):
+        state_version = singer.get_bookmark(state,
+                                            catalog_entry.tap_stream_id,
+                                            'version')
+
+        activate_version_message = singer.ActivateVersionMessage(
+            stream=catalog_entry.stream,
+            version=stream_version
+        )
+
+        # For the initial replication, emit an ACTIVATE_VERSION message
+        # at the beginning so the records show up right away.
+        if not initial_full_table_complete and not (version_exists and state_version is None):
+            singer.write_message(activate_version_message)
+
+        with snowflake_conn.connect_with_backoff() as open_conn:
+            with open_conn.cursor() as cur:
+                select_sql = common.generate_select_sql(catalog_entry, columns, snowflake_conn)
+                params = {}
+
+                common.sync_query(cur,
+                                catalog_entry,
+                                state,
+                                select_sql,
+                                columns,
+                                stream_version,
+                                params)
+
+        # clear max pk value and last pk fetched upon successful sync
+        singer.clear_bookmark(state, catalog_entry.tap_stream_id, 'max_pk_values')
+        singer.clear_bookmark(state, catalog_entry.tap_stream_id, 'last_pk_fetched')
+
         singer.write_message(activate_version_message)
-
-    with snowflake_conn.connect_with_backoff() as open_conn:
-        with open_conn.cursor() as cur:
-            select_sql = common.generate_select_sql(catalog_entry, columns)
-            params = {}
-
-            common.sync_query(cur,
-                              catalog_entry,
-                              state,
-                              select_sql,
-                              columns,
-                              stream_version,
-                              params)
-
-    # clear max pk value and last pk fetched upon successful sync
-    singer.clear_bookmark(state, catalog_entry.tap_stream_id, 'max_pk_values')
-    singer.clear_bookmark(state, catalog_entry.tap_stream_id, 'last_pk_fetched')
-
-    singer.write_message(activate_version_message)
