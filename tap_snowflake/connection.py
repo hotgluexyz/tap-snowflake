@@ -14,7 +14,6 @@ import snowflake.connector.errors
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from snowflake.connector.errorcode import ER_INVALID_PRIVATE_KEY
 from snowflake.connector.errors import ProgrammingError
-from tap_snowflake.connection import ER_INVALID_PRIVATE_KEY
 from datetime import datetime
 from cryptography.hazmat.primitives.serialization import load_der_private_key
 
