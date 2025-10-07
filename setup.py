@@ -26,6 +26,7 @@ setup(name='pipelinewise-tap-snowflake',
             'numpy<1.24.0', 
             'snowflake-connector-python==2.0.2; python_version == "3.7"',
             'snowflake-connector-python[pandas]~=3.4.0; python_version == "3.10"',
+            'azure-storage-blob<2.0.0; python_version == "3.7"',
             'pendulum==1.2.0',
       ],
       extras_require={
