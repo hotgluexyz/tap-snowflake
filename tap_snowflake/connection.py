@@ -8,7 +8,6 @@ import sys
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 import snowflake.connector
-import snowflake.connector.auth_keypair as auth_keypair
 import jwt
 import snowflake.connector.errors
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
@@ -16,6 +15,10 @@ from snowflake.connector.errorcode import ER_INVALID_PRIVATE_KEY
 from snowflake.connector.errors import ProgrammingError
 from datetime import datetime
 from cryptography.hazmat.primitives.serialization import load_der_private_key
+
+python_version = sys.version_info
+if python_version.major == 3 and python_version.minor < 10:
+    import snowflake.connector.auth_keypair as auth_keypair
 
 LOGGER = singer.get_logger('tap_snowflake')
 
@@ -155,7 +158,8 @@ class SnowflakeConnection:
 
             return self._jwt_token
         # Patch the method
-        auth_keypair.AuthByKeyPair.authenticate = patched_authenticate
+        if python_version.major == 3 and python_version.minor < 10:
+            auth_keypair.AuthByKeyPair.authenticate = patched_authenticate
         
         return snowflake.connector.connect(
             user=self.connection_config['user'],
