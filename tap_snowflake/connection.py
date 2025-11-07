@@ -8,6 +8,17 @@ import sys
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 import snowflake.connector
+import jwt
+import snowflake.connector.errors
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+from snowflake.connector.errorcode import ER_INVALID_PRIVATE_KEY
+from snowflake.connector.errors import ProgrammingError
+from datetime import datetime
+from cryptography.hazmat.primitives.serialization import load_der_private_key
+
+python_version = sys.version_info
+if python_version.major == 3 and python_version.minor < 10:
+    import snowflake.connector.auth_keypair as auth_keypair
 
 LOGGER = singer.get_logger('tap_snowflake')
 
@@ -104,6 +115,52 @@ class SnowflakeConnection:
 
     def open_connection(self):
         """Connect to snowflake database"""
+
+        # patch the snowflake connector to use the private key
+        def patched_authenticate(
+                self, authenticator, service_name, account, user, password):
+            account = account.upper()
+            user = user.upper()
+
+            now = datetime.utcnow()
+
+            try:
+                private_key = load_der_private_key(data=self._private_key, password=None, backend=default_backend())
+            except Exception as e:
+                raise ProgrammingError(
+                    msg=u'Failed to load private key: {}\nPlease provide a valid unencrypted rsa private '
+                        u'key in DER format as bytes object'.format(str(e)),
+                    errno=ER_INVALID_PRIVATE_KEY
+                )
+
+            if not isinstance(private_key, RSAPrivateKey):
+                raise ProgrammingError(
+                    msg=u'Private key type ({}) not supported.\nPlease provide a valid rsa private '
+                        u'key in DER format as bytes object'.format(private_key.__class__.__name__),
+                    errno=ER_INVALID_PRIVATE_KEY
+                )
+
+            public_key_fp = self.calculate_public_key_fingerprint(private_key)
+
+            self._jwt_token_exp = now + self.LIFETIME
+            payload = {
+                self.ISSUER: "{}.{}.{}".format(account, user, public_key_fp),
+                self.SUBJECT: "{}.{}".format(account, user),
+                self.ISSUE_TIME: now,
+                self.EXPIRE_TIME: self._jwt_token_exp
+            }
+
+            self._jwt_token = jwt.encode(payload, private_key,
+                                        algorithm=self.ALGORITHM)
+            
+            if isinstance(self._jwt_token, bytes):
+                self._jwt_token = self._jwt_token.decode("utf-8")
+
+            return self._jwt_token
+        # Patch the method
+        if python_version.major == 3 and python_version.minor < 10:
+            auth_keypair.AuthByKeyPair.authenticate = patched_authenticate
+        
         return snowflake.connector.connect(
             user=self.connection_config['user'],
             password=self.connection_config.get('password', None),
