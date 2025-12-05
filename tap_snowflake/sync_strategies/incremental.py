@@ -76,7 +76,7 @@ def sync_table(snowflake_conn, catalog_entry, state, columns, config={}):
             params = {}
             if replication_key_value is not None:
                 # Handle datetime replication keys
-                if catalog_entry.schema.properties[replication_key_metadata].type.includes('string'):
+                if "string" in catalog_entry.schema.properties[replication_key_metadata].type:
                     replication_key_value = pendulum.parse(replication_key_value)
 
                     # For datetime, use quotes in SQL
