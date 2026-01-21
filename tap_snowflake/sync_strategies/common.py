@@ -270,8 +270,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
     file_name = f"{config.get('dbname')}_{config.get('schema')}_{catalog_entry.table}"
     aws_export_path = f"s3://{aws_bucket}/{job_root}/sync-output"
     max_file_size = 9120 # 5GB
-    # local_output_dir = f"/home/hotglue/{job_id}/sync-output" if job_root else f"../.secrets"
-    local_output_dir = f"../.secrets"
+    local_output_dir = f"/home/hotglue/{job_id}/sync-output" if job_root else f"../.secrets"
 
     with cursor.connect_with_backoff() as open_conn:
         with open_conn.cursor() as cur:
