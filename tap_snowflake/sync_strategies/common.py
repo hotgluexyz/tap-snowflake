@@ -14,7 +14,7 @@ from pendulum import parse
 import os
 import json
 import pathlib
-
+from snowflake.connector import ProgrammingError
 LOGGER = singer.get_logger('tap_snowflake')
 
 def escape(string):
@@ -269,8 +269,9 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
     job_id = os.environ.get("JOB_ID", "")
     file_name = f"{config.get('dbname')}_{config.get('schema')}_{catalog_entry.table}"
     aws_export_path = f"s3://{aws_bucket}/{job_root}/sync-output"
-    max_file_size = 5368709120 # 5GB
-    local_output_dir = f"/home/hotglue/{job_id}/sync-output" if job_root else f"../.secrets"
+    max_file_size = 9120 # 5GB
+    # local_output_dir = f"/home/hotglue/{job_id}/sync-output" if job_root else f"../.secrets"
+    local_output_dir = f"../.secrets"
 
     with cursor.connect_with_backoff() as open_conn:
         with open_conn.cursor() as cur:
@@ -281,7 +282,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             
             formatted_column_names = cast_column_types(column_types, columns)
 
-            query = f"""
+            base_query = f"""
             COPY INTO '{aws_export_path}/{file_name}.parquet'
             FROM (
                 SELECT 
@@ -293,10 +294,23 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}' AWS_TOKEN='{aws_session}')
             OVERWRITE = TRUE
             HEADER = TRUE
-            SINGLE = TRUE
-            MAX_FILE_SIZE = {max_file_size};
+            MAX_FILE_SIZE = {max_file_size}
             """ 
-            cur.execute(query)
+            try:
+                query = f"""
+                {base_query}
+                SINGLE = TRUE
+                """
+                cur.execute(query)
+            except ProgrammingError as e:
+                if "Max file size" in str(e) and "exceeded for unload single file mode." in str(e):
+                    # Fallback to multiple file mode
+                    query = f"""
+                    {base_query}
+                    SINGLE = FALSE
+                    """
+                    cur.execute(query)
+            
             LOGGER.info(f"File downloaded successfully to S3")
     
             # get rows len to add to the job metrics
