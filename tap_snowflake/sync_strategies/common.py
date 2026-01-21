@@ -281,8 +281,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             
             formatted_column_names = cast_column_types(column_types, columns)
 
-            base_query = f"""
-            COPY INTO '{aws_export_path}/{file_name}.parquet'
+            query_structure = f"""
             FROM (
                 SELECT 
                     {', '.join(formatted_column_names)}
@@ -297,7 +296,8 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             """ 
             try:
                 query = f"""
-                {base_query}
+                COPY INTO '{aws_export_path}/{file_name}.parquet'
+                {query_structure}
                 SINGLE = TRUE
                 """
                 cur.execute(query)
@@ -305,7 +305,8 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
                 if "Max file size" in str(e) and "exceeded for unload single file mode." in str(e):
                     # Fallback to multiple file mode
                     query = f"""
-                    {base_query}
+                    COPY INTO '{aws_export_path}/{file_name}'
+                    {query_structure}
                     SINGLE = FALSE
                     """
                     cur.execute(query)
