@@ -309,6 +309,8 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
                     SINGLE = FALSE
                     """
                     cur.execute(query)
+                else:
+                    raise e from e
             
             LOGGER.info(f"File downloaded successfully to S3")
     
