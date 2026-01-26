@@ -14,7 +14,7 @@ from pendulum import parse
 import os
 import json
 import pathlib
-
+from snowflake.connector import ProgrammingError
 LOGGER = singer.get_logger('tap_snowflake')
 
 def escape(string):
@@ -281,8 +281,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             
             formatted_column_names = cast_column_types(column_types, columns)
 
-            query = f"""
-            COPY INTO '{aws_export_path}/{file_name}.parquet'
+            query_structure = f"""
             FROM (
                 SELECT 
                     {', '.join(formatted_column_names)}
@@ -293,10 +292,27 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}' AWS_TOKEN='{aws_session}')
             OVERWRITE = TRUE
             HEADER = TRUE
-            SINGLE = TRUE
-            MAX_FILE_SIZE = {max_file_size};
+            MAX_FILE_SIZE = {max_file_size}
             """ 
-            cur.execute(query)
+            try:
+                query = f"""
+                COPY INTO '{aws_export_path}/{file_name}.parquet'
+                {query_structure}
+                SINGLE = TRUE
+                """
+                cur.execute(query)
+            except ProgrammingError as e:
+                if "Max file size" in str(e) and "exceeded for unload single file mode." in str(e):
+                    # Fallback to multiple file mode
+                    query = f"""
+                    COPY INTO '{aws_export_path}/{file_name}'
+                    {query_structure}
+                    SINGLE = FALSE
+                    """
+                    cur.execute(query)
+                else:
+                    raise e from e
+            
             LOGGER.info(f"File downloaded successfully to S3")
     
             # get rows len to add to the job metrics
@@ -308,9 +324,9 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             rowcount = cur._total_rowcount
             update_job_metrics(file_name, rowcount, local_output_dir)
 
-            # download the file from s3 to the local output directory
-            LOGGER.info(f"Downloading file {file_name} to local output directory {local_output_dir}")
-            os.system(f"aws s3 cp {aws_export_path}/{file_name}.parquet {local_output_dir} > /dev/null 2>&1")
+            # download the file(s) from s3 to the local output directory
+            LOGGER.info(f"Downloading file(s) for {file_name} to local output directory {local_output_dir}")
+            os.system(f"aws s3 cp {aws_export_path} {local_output_dir} --recursive > /dev/null 2>&1")
             LOGGER.info(f"File downloaded successfully to local output directory")
 
 def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version, params, replication_method=None):
