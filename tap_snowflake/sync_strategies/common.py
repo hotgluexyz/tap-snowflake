@@ -134,8 +134,8 @@ def generate_select_sql(catalog_entry, columns, snowflake_conn=None):
     select_sql = select_sql.replace('%', '%%')
     return select_sql
 
-def handle_datetime_if_datetime(elem):
-    value = elem
+def format_datetime_to_iso_tuple(elem):
+    value = (elem,)
 
     if isinstance(elem, datetime.datetime):
         value = (elem.isoformat() + '+00:00',)
@@ -160,7 +160,7 @@ def row_to_singer_record(catalog_entry, version, row, columns, time_extracted):
     for idx, elem in enumerate(row):
         property_type = catalog_entry.schema.properties[columns[idx]].type
         if isinstance(elem, datetime.datetime) or isinstance(elem, datetime.date) or isinstance(elem, datetime.timedelta) or isinstance(elem, datetime.time):
-            row_to_persist += handle_datetime_if_datetime(elem)
+            row_to_persist += format_datetime_to_iso_tuple(elem)
 
         elif isinstance(elem, bytes):
             # for BIT value, treat 0 as False and anything else as True
@@ -330,7 +330,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             # get rows len to add to the job metrics
             LOGGER.info(f"Getting job metrics for {file_name}")
             count_query = f"""
-            SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
+            SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table} {incremental_sql}
             """
             cur.execute(count_query)
             rowcount = cur._total_rowcount
@@ -342,7 +342,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
                                                 'replication_key',
                                                 replication_key_metadata)
 
-                rep_key_value = handle_datetime_if_datetime(max_replication_key_value)
+                rep_key_value = format_datetime_to_iso_tuple(max_replication_key_value)[0]
 
 
                 state = singer.write_bookmark(state,
