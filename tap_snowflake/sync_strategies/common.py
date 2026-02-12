@@ -153,7 +153,6 @@ def handle_datetime_if_datetime(elem):
 
     return value
 
-
 # pylint: disable=too-many-branches
 def row_to_singer_record(catalog_entry, version, row, columns, time_extracted):
     """Transform SQL row to singer compatible record message"""
