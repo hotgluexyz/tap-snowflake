@@ -342,7 +342,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
                                                 'replication_key',
                                                 replication_key_metadata)
 
-                rep_key_value = clean_rep_key_value(format_datetime_to_iso_tuple(max_replication_key_value)[0])
+                rep_key_value = clean_rep_key_value(format_datetime_to_iso_tuple(max_replication_key_value)[0]) if max_replication_key_value is not None else None
 
 
                 state = singer.write_bookmark(state,
