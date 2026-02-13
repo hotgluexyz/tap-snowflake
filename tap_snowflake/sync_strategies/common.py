@@ -283,7 +283,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
         with open_conn.cursor() as cur:
 
             if replication_key_metadata is not None:
-                cur.execute(f"SELECT MAX({replication_key_metadata}) FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}")
+                cur.execute(f"SELECT MAX(\"{replication_key_metadata}\") FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}")
                 max_replication_key_value = cur.fetchone()[0]
 
             column_types = get_column_names(cur, config, catalog_entry.table)
@@ -342,7 +342,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
                                                 'replication_key',
                                                 replication_key_metadata)
 
-                rep_key_value = format_datetime_to_iso_tuple(max_replication_key_value)[0]
+                rep_key_value = clean_rep_key_value(format_datetime_to_iso_tuple(max_replication_key_value)[0])
 
 
                 state = singer.write_bookmark(state,
