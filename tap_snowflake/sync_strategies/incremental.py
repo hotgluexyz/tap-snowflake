@@ -73,6 +73,7 @@ def sync_table(snowflake_conn, catalog_entry, state, columns, config={}):
     with snowflake_conn.connect_with_backoff() as open_conn:
         with open_conn.cursor() as cur:
             select_sql = common.generate_select_sql(catalog_entry, columns, snowflake_conn)
+            incremental_sql = ""
             params = {}
             if replication_key_value is not None:
                 # Handle datetime replication keys
@@ -80,25 +81,29 @@ def sync_table(snowflake_conn, catalog_entry, state, columns, config={}):
                     replication_key_value = pendulum.parse(replication_key_value)
 
                     # For datetime, use quotes in SQL
-                    select_sql += ' WHERE "{}" > \'{}\' ORDER BY "{}" ASC'.format(
+                    incremental_sql += ' WHERE "{}" > \'{}\' ORDER BY "{}" ASC'.format(
                         replication_key_metadata,
                         replication_key_value,
                         replication_key_metadata)
                 else:
                     # Handle integer/numeric replication keys (like BIGINT)
                     # For numeric values, don't use quotes in SQL
-                    select_sql += ' WHERE "{}" > {} ORDER BY "{}" ASC'.format(
+                    incremental_sql += ' WHERE "{}" > {} ORDER BY "{}" ASC'.format(
                         replication_key_metadata,
                         replication_key_value,
                         replication_key_metadata)
             elif replication_key_metadata is not None:
-                select_sql += ' ORDER BY "{}" ASC'.format(replication_key_metadata)
+                incremental_sql += ' ORDER BY "{}" ASC'.format(replication_key_metadata)
 
-            common.sync_query(cur,
-                            catalog_entry,
-                            state,
-                            select_sql,
-                            columns,
-                            stream_version,
-                            params,
-                            replication_method="INCREMENTAL")
+            select_sql += incremental_sql
+            if config.get("download_data_as_files", False):
+                common.download_data_as_files(snowflake_conn, columns, config, catalog_entry, incremental_sql, replication_key_metadata, state)
+            else:
+                common.sync_query(cur,
+                                catalog_entry,
+                                state,
+                                select_sql,
+                                columns,
+                                stream_version,
+                                params,
+                                replication_method="INCREMENTAL")

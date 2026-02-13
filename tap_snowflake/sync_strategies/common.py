@@ -134,6 +134,24 @@ def generate_select_sql(catalog_entry, columns, snowflake_conn=None):
     select_sql = select_sql.replace('%', '%%')
     return select_sql
 
+def format_datetime_to_iso_tuple(elem):
+    value = (elem,)
+
+    if isinstance(elem, datetime.datetime):
+        value = (elem.isoformat() + '+00:00',)
+
+    elif isinstance(elem, datetime.date):
+        value = (elem.isoformat() + 'T00:00:00+00:00',)
+
+    elif isinstance(elem, datetime.timedelta):
+        epoch = datetime.datetime.utcfromtimestamp(0)
+        timedelta_from_epoch = epoch + elem
+        value = (timedelta_from_epoch.isoformat() + '+00:00',)
+
+    elif isinstance(elem, datetime.time):
+        value = (str(elem),)
+
+    return value
 
 # pylint: disable=too-many-branches
 def row_to_singer_record(catalog_entry, version, row, columns, time_extracted):
@@ -141,19 +159,8 @@ def row_to_singer_record(catalog_entry, version, row, columns, time_extracted):
     row_to_persist = ()
     for idx, elem in enumerate(row):
         property_type = catalog_entry.schema.properties[columns[idx]].type
-        if isinstance(elem, datetime.datetime):
-            row_to_persist += (elem.isoformat() + '+00:00',)
-
-        elif isinstance(elem, datetime.date):
-            row_to_persist += (elem.isoformat() + 'T00:00:00+00:00',)
-
-        elif isinstance(elem, datetime.timedelta):
-            epoch = datetime.datetime.utcfromtimestamp(0)
-            timedelta_from_epoch = epoch + elem
-            row_to_persist += (timedelta_from_epoch.isoformat() + '+00:00',)
-
-        elif isinstance(elem, datetime.time):
-            row_to_persist += (str(elem),)
+        if isinstance(elem, datetime.datetime) or isinstance(elem, datetime.date) or isinstance(elem, datetime.timedelta) or isinstance(elem, datetime.time):
+            row_to_persist += format_datetime_to_iso_tuple(elem)
 
         elif isinstance(elem, bytes):
             # for BIT value, treat 0 as False and anything else as True
@@ -258,7 +265,7 @@ def cast_column_types(column_types, selected_columns):
             formatted_column_names.append(column_name)
     return formatted_column_names
 
-def download_data_as_files(cursor, columns, config, catalog_entry, incremental_sql=""):
+def download_data_as_files(cursor, columns, config, catalog_entry, incremental_sql="", replication_key_metadata=None, state=None):
     """Download data as files"""
 
     aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
@@ -274,6 +281,11 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
 
     with cursor.connect_with_backoff() as open_conn:
         with open_conn.cursor() as cur:
+
+            if replication_key_metadata is not None:
+                cur.execute(f"SELECT MAX(\"{replication_key_metadata}\") FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}")
+                max_replication_key_value = cur.fetchone()[0]
+
             column_types = get_column_names(cur, config, catalog_entry.table)
             formatted_column_names = []
 
@@ -318,11 +330,25 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             # get rows len to add to the job metrics
             LOGGER.info(f"Getting job metrics for {file_name}")
             count_query = f"""
-            SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
+            SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table} {incremental_sql}
             """
             cur.execute(count_query)
             rowcount = cur._total_rowcount
             update_job_metrics(file_name, rowcount, local_output_dir)
+
+            if replication_key_metadata is not None:
+                state = singer.write_bookmark(state,
+                                                catalog_entry.tap_stream_id,
+                                                'replication_key',
+                                                replication_key_metadata)
+
+                rep_key_value = clean_rep_key_value(format_datetime_to_iso_tuple(max_replication_key_value)[0]) if max_replication_key_value is not None else None
+
+
+                state = singer.write_bookmark(state,
+                                                catalog_entry.tap_stream_id,
+                                                'replication_key_value',
+                                                rep_key_value)
 
             # download the file(s) from s3 to the local output directory
             LOGGER.info(f"Downloading file(s) for {file_name} to local output directory {local_output_dir}")
