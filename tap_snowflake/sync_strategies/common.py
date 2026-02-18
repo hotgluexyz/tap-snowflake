@@ -299,6 +299,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
                     {', '.join(formatted_column_names)}
                 FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
                 {incremental_sql}
+                LIMIT 10000000
             )
             FILE_FORMAT = (TYPE = PARQUET COMPRESSION = SNAPPY)
             CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}' AWS_TOKEN='{aws_session}')
@@ -307,20 +308,24 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             MAX_FILE_SIZE = {max_file_size}
             """ 
             try:
+                LOGGER.info(f"fetching data in one single file")
                 query = f"""
                 COPY INTO '{aws_export_path}/{file_name}.parquet'
                 {query_structure}
                 SINGLE = TRUE
                 """
+                LOGGER.info(f"single file mode query: {query}")
                 cur.execute(query)
             except ProgrammingError as e:
                 if "Max file size" in str(e) and "exceeded for unload single file mode." in str(e):
+                    LOGGER.info(f"Max file size exceeded for single file mode, falling back to multiple file mode")
                     # Fallback to multiple file mode
                     query = f"""
                     COPY INTO '{aws_export_path}/{file_name}'
                     {query_structure}
                     SINGLE = FALSE
                     """
+                    LOGGER.info(f"multiple file mode query: {query}")
                     cur.execute(query)
                 else:
                     raise e from e
@@ -352,7 +357,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
 
             # download the file(s) from s3 to the local output directory
             LOGGER.info(f"Downloading file(s) for {file_name} to local output directory {local_output_dir}")
-            os.system(f"aws s3 cp {aws_export_path} {local_output_dir} --recursive > /dev/null 2>&1")
+            os.system(f"aws s3 cp {aws_export_path} {local_output_dir} --recursive")
             LOGGER.info(f"File downloaded successfully to local output directory")
 
 def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version, params, replication_method=None):
