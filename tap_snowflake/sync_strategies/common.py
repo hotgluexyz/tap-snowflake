@@ -330,30 +330,30 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             #     else:
             #         raise e from e
             
-            LOGGER.info(f"File downloaded successfully to S3")
+            # LOGGER.info(f"File downloaded successfully to S3")
     
-            # get rows len to add to the job metrics
-            LOGGER.info(f"Getting job metrics for {file_name}")
-            count_query = f"""
-            SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table} {incremental_sql}
-            """
-            cur.execute(count_query)
-            rowcount = cur._total_rowcount
-            update_job_metrics(file_name, rowcount, local_output_dir)
+            # # get rows len to add to the job metrics
+            # LOGGER.info(f"Getting job metrics for {file_name}")
+            # count_query = f"""
+            # SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table} {incremental_sql}
+            # """
+            # cur.execute(count_query)
+            # rowcount = cur._total_rowcount
+            # update_job_metrics(file_name, rowcount, local_output_dir)
 
-            if replication_key_metadata is not None:
-                state = singer.write_bookmark(state,
-                                                catalog_entry.tap_stream_id,
-                                                'replication_key',
-                                                replication_key_metadata)
+            # if replication_key_metadata is not None:
+            #     state = singer.write_bookmark(state,
+            #                                     catalog_entry.tap_stream_id,
+            #                                     'replication_key',
+            #                                     replication_key_metadata)
 
-                rep_key_value = clean_rep_key_value(format_datetime_to_iso_tuple(max_replication_key_value)[0]) if max_replication_key_value is not None else None
+            #     rep_key_value = clean_rep_key_value(format_datetime_to_iso_tuple(max_replication_key_value)[0]) if max_replication_key_value is not None else None
 
 
-                state = singer.write_bookmark(state,
-                                                catalog_entry.tap_stream_id,
-                                                'replication_key_value',
-                                                rep_key_value)
+            #     state = singer.write_bookmark(state,
+            #                                     catalog_entry.tap_stream_id,
+            #                                     'replication_key_value',
+            #                                     rep_key_value)
 
             # download the file(s) from s3 to the local output directory
             LOGGER.info(f"Downloading file(s) for {file_name} to local output directory {local_output_dir}")
