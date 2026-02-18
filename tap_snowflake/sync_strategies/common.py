@@ -289,46 +289,46 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             column_types = get_column_names(cur, config, catalog_entry.table)
             formatted_column_names = []
 
-            LOGGER.info(f"Downloading file {file_name} to S3 {aws_export_path}")
+            # LOGGER.info(f"Downloading file {file_name} to S3 {aws_export_path}")
             
-            formatted_column_names = cast_column_types(column_types, columns)
+            # formatted_column_names = cast_column_types(column_types, columns)
 
-            query_structure = f"""
-            FROM (
-                SELECT 
-                    {', '.join(formatted_column_names)}
-                FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
-                {incremental_sql}
-                LIMIT 10000000
-            )
-            FILE_FORMAT = (TYPE = PARQUET COMPRESSION = SNAPPY)
-            CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}' AWS_TOKEN='{aws_session}')
-            OVERWRITE = TRUE
-            HEADER = TRUE
-            MAX_FILE_SIZE = {max_file_size}
-            """ 
-            try:
-                LOGGER.info(f"fetching data in one single file")
-                query = f"""
-                COPY INTO '{aws_export_path}/{file_name}.parquet'
-                {query_structure}
-                SINGLE = FALSE
-                """
-                LOGGER.info(f"single file mode query: {query}")
-                cur.execute(query)
-            except ProgrammingError as e:
-                if "Max file size" in str(e) and "exceeded for unload single file mode." in str(e):
-                    LOGGER.info(f"Max file size exceeded for single file mode, falling back to multiple file mode")
-                    # Fallback to multiple file mode
-                    query = f"""
-                    COPY INTO '{aws_export_path}/{file_name}'
-                    {query_structure}
-                    SINGLE = FALSE
-                    """
-                    LOGGER.info(f"multiple file mode query: {query}")
-                    cur.execute(query)
-                else:
-                    raise e from e
+            # query_structure = f"""
+            # FROM (
+            #     SELECT 
+            #         {', '.join(formatted_column_names)}
+            #     FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
+            #     {incremental_sql}
+            #     LIMIT 10000000
+            # )
+            # FILE_FORMAT = (TYPE = PARQUET COMPRESSION = SNAPPY)
+            # CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}' AWS_TOKEN='{aws_session}')
+            # OVERWRITE = TRUE
+            # HEADER = TRUE
+            # MAX_FILE_SIZE = {max_file_size}
+            # """ 
+            # try:
+            #     LOGGER.info(f"fetching data in one single file")
+            #     query = f"""
+            #     COPY INTO '{aws_export_path}/{file_name}.parquet'
+            #     {query_structure}
+            #     SINGLE = FALSE
+            #     """
+            #     LOGGER.info(f"single file mode query: {query}")
+            #     cur.execute(query)
+            # except ProgrammingError as e:
+            #     if "Max file size" in str(e) and "exceeded for unload single file mode." in str(e):
+            #         LOGGER.info(f"Max file size exceeded for single file mode, falling back to multiple file mode")
+            #         # Fallback to multiple file mode
+            #         query = f"""
+            #         COPY INTO '{aws_export_path}/{file_name}'
+            #         {query_structure}
+            #         SINGLE = FALSE
+            #         """
+            #         LOGGER.info(f"multiple file mode query: {query}")
+            #         cur.execute(query)
+            #     else:
+            #         raise e from e
             
             LOGGER.info(f"File downloaded successfully to S3")
     
