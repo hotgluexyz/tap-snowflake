@@ -312,7 +312,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
                 query = f"""
                 COPY INTO '{aws_export_path}/{file_name}.parquet'
                 {query_structure}
-                SINGLE = TRUE
+                SINGLE = FALSE
                 """
                 LOGGER.info(f"single file mode query: {query}")
                 cur.execute(query)
