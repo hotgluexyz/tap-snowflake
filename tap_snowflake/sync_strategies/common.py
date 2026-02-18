@@ -330,7 +330,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             # get rows len to add to the job metrics
             LOGGER.info(f"Getting job metrics for {file_name}")
             count_query = f"""
-            SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
+            SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table} {incremental_sql}
             """
             cur.execute(count_query)
             rowcount = cur._total_rowcount

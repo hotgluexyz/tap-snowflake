@@ -458,7 +458,6 @@ def do_sync_incremental(snowflake_conn, catalog_entry, state, columns, config={}
                          bookmark_properties=[replication_key],
                          snowflake_conn=snowflake_conn)
 
-    LOGGER.info(f"Syncing table {catalog_entry.stream} with replication key {replication_key}")
     incremental.sync_table(snowflake_conn, catalog_entry, state, columns, config)
 
     singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
@@ -521,7 +520,6 @@ def sync_streams(snowflake_conn, catalog, state, config={}):
 
 def do_sync(snowflake_conn, config, catalog, state):
     catalog = get_streams(snowflake_conn, catalog, config, state)
-    LOGGER.info(f"Catalog: {catalog}")
     sync_streams(snowflake_conn, catalog, state, config)
 
 
