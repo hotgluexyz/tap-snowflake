@@ -289,75 +289,79 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             column_types = get_column_names(cur, config, catalog_entry.table)
             formatted_column_names = []
 
-            # LOGGER.info(f"Downloading file {file_name} to S3 {aws_export_path}")
+            LOGGER.info(f"Downloading file {file_name} to S3 {aws_export_path}")
             
-            # formatted_column_names = cast_column_types(column_types, columns)
+            formatted_column_names = cast_column_types(column_types, columns)
 
-            # query_structure = f"""
-            # FROM (
-            #     SELECT 
-            #         {', '.join(formatted_column_names)}
-            #     FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
-            #     {incremental_sql}
-            #     LIMIT 10000000
-            # )
-            # FILE_FORMAT = (TYPE = PARQUET COMPRESSION = SNAPPY)
-            # CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}' AWS_TOKEN='{aws_session}')
-            # OVERWRITE = TRUE
-            # HEADER = TRUE
-            # MAX_FILE_SIZE = {max_file_size}
-            # """ 
-            # try:
-            #     LOGGER.info(f"fetching data in one single file")
-            #     query = f"""
-            #     COPY INTO '{aws_export_path}/{file_name}.parquet'
-            #     {query_structure}
-            #     SINGLE = FALSE
-            #     """
-            #     LOGGER.info(f"single file mode query: {query}")
-            #     cur.execute(query)
-            # except ProgrammingError as e:
-            #     if "Max file size" in str(e) and "exceeded for unload single file mode." in str(e):
-            #         LOGGER.info(f"Max file size exceeded for single file mode, falling back to multiple file mode")
-            #         # Fallback to multiple file mode
-            #         query = f"""
-            #         COPY INTO '{aws_export_path}/{file_name}'
-            #         {query_structure}
-            #         SINGLE = FALSE
-            #         """
-            #         LOGGER.info(f"multiple file mode query: {query}")
-            #         cur.execute(query)
-            #     else:
-            #         raise e from e
+            query_structure = f"""
+            FROM (
+                SELECT 
+                    {', '.join(formatted_column_names)}
+                FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
+                {incremental_sql}
+            )
+            FILE_FORMAT = (TYPE = PARQUET COMPRESSION = SNAPPY)
+            CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}' AWS_TOKEN='{aws_session}')
+            OVERWRITE = TRUE
+            HEADER = TRUE
+            MAX_FILE_SIZE = {max_file_size}
+            """ 
+            try:
+                query = f"""
+                COPY INTO '{aws_export_path}/{file_name}.parquet'
+                {query_structure}
+                SINGLE = TRUE
+                """
+                cur.execute(query)
+            except ProgrammingError as e:
+                if "Max file size" in str(e) and "exceeded for unload single file mode." in str(e):
+                    # Fallback to multiple file mode
+                    query = f"""
+                    COPY INTO '{aws_export_path}/{file_name}'
+                    {query_structure}
+                    SINGLE = FALSE
+                    """
+                    cur.execute(query)
+                else:
+                    raise e from e
             
-            # LOGGER.info(f"File downloaded successfully to S3")
+            LOGGER.info(f"File downloaded successfully to S3")
     
-            # # get rows len to add to the job metrics
-            # LOGGER.info(f"Getting job metrics for {file_name}")
-            # count_query = f"""
-            # SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table} {incremental_sql}
-            # """
-            # cur.execute(count_query)
-            # rowcount = cur._total_rowcount
-            # update_job_metrics(file_name, rowcount, local_output_dir)
+            # get rows len to add to the job metrics
+            LOGGER.info(f"Getting job metrics for {file_name}")
+            count_query = f"""
+            SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
+            """
+            cur.execute(count_query)
+            rowcount = cur._total_rowcount
+            update_job_metrics(file_name, rowcount, local_output_dir)
 
-            # if replication_key_metadata is not None:
-            #     state = singer.write_bookmark(state,
-            #                                     catalog_entry.tap_stream_id,
-            #                                     'replication_key',
-            #                                     replication_key_metadata)
+            if replication_key_metadata is not None:
+                state = singer.write_bookmark(state,
+                                                catalog_entry.tap_stream_id,
+                                                'replication_key',
+                                                replication_key_metadata)
 
-            #     rep_key_value = clean_rep_key_value(format_datetime_to_iso_tuple(max_replication_key_value)[0]) if max_replication_key_value is not None else None
+                rep_key_value = clean_rep_key_value(format_datetime_to_iso_tuple(max_replication_key_value)[0]) if max_replication_key_value is not None else None
 
 
-            #     state = singer.write_bookmark(state,
-            #                                     catalog_entry.tap_stream_id,
-            #                                     'replication_key_value',
-            #                                     rep_key_value)
+                state = singer.write_bookmark(state,
+                                                catalog_entry.tap_stream_id,
+                                                'replication_key_value',
+                                                rep_key_value)
 
             # download the file(s) from s3 to the local output directory
             LOGGER.info(f"Downloading file(s) for {file_name} to local output directory {local_output_dir}")
-            os.system(f"aws s3 cp {aws_export_path} {local_output_dir} --recursive")
+            error_file = os.path.join(local_output_dir, f"{file_name}_aws_s3_cp_errors.log")
+            s3_cp_command = f"aws s3 cp {aws_export_path} {local_output_dir} --recursive 1>/dev/null 2>{error_file}"
+            exitcode = os.system(s3_cp_command)
+            
+            # Check if the error file has content
+            error_exists = os.path.getsize(error_file) > 0 if os.path.exists(error_file) else False
+            if exitcode != 0 or error_exists:
+                with open(error_file, "r") as ef:
+                    error_content = ef.read()
+                raise RuntimeError(f"Failed to download files from S3. aws s3 cp exit code: {exitcode}. See error file: {error_file}\n\n{error_content}")
             LOGGER.info(f"File downloaded successfully to local output directory")
 
 def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version, params, replication_method=None):
