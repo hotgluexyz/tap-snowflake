@@ -454,10 +454,22 @@ def do_sync_incremental(snowflake_conn, catalog_entry, state, columns, config={}
         raise Exception(f'Cannot use INCREMENTAL replication for table ({catalog_entry.stream}) without a replication '
                         f'key.')
 
+    # check if table exists in the database and if it has data
+    table_exists = snowflake_conn.query(f"SELECT COUNT(*) FROM {catalog_entry.stream}")
+    if table_exists > 0:
+        LOGGER.info(f"Table {catalog_entry.stream} exists and has data")
+    else:
+        LOGGER.info(f"Table {catalog_entry.stream} does not exist or has no data")
+
+    # check all available tables in the database
+    tables = snowflake_conn.query("SHOW TABLES;")
+    LOGGER.info(f"Available tables in the database: {tables}")
+
     write_schema_message(catalog_entry=catalog_entry,
                          bookmark_properties=[replication_key],
                          snowflake_conn=snowflake_conn)
 
+    LOGGER.info(f"Syncing table {catalog_entry.stream} with replication key {replication_key}")
     incremental.sync_table(snowflake_conn, catalog_entry, state, columns, config)
 
     singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
@@ -520,6 +532,7 @@ def sync_streams(snowflake_conn, catalog, state, config={}):
 
 def do_sync(snowflake_conn, config, catalog, state):
     catalog = get_streams(snowflake_conn, catalog, config, state)
+    LOGGER.info(f"Catalog: {catalog}")
     sync_streams(snowflake_conn, catalog, state, config)
 
 
