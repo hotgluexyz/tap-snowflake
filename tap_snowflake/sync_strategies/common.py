@@ -371,7 +371,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             finally:
                 if os.path.exists(error_file):
                     os.remove(error_file)
-                LOGGER.info(f"Error file removed successfully")
+                    LOGGER.info(f"Error file removed successfully")
 
 
 def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version, params, replication_method=None):
