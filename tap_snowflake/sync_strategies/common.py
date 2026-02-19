@@ -356,12 +356,16 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             s3_cp_command = f"aws s3 cp {aws_export_path} {local_output_dir} --recursive 1>/dev/null 2>{error_file}"
             exitcode = os.system(s3_cp_command)
             
-            # Check if the error file has content
-            error_exists = os.path.getsize(error_file) > 0 if os.path.exists(error_file) else False
-            if exitcode != 0 or error_exists:
-                with open(error_file, "r") as ef:
-                    error_content = ef.read()
-                raise RuntimeError(f"Failed to download files from S3. aws s3 cp exit code: {exitcode}. See error file: {error_file}\n\n{error_content}")
+            if exitcode != 0:
+                if os.path.exists(error_file):
+                    with open(error_file, "r") as ef:
+                        error_content = ef.read()
+                    raise RuntimeError(f"Failed to download files from S3. aws s3 cp exit code: {exitcode}. Error: {error_content}")
+                else:
+                    raise RuntimeError(
+                        f"Failed to download files from S3. aws s3 cp exit code: {exitcode}. "
+                        f"Error output could not be captured (e.g. output directory missing or not writable): {local_output_dir}"
+                    )
             LOGGER.info(f"File downloaded successfully to local output directory")
 
 def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version, params, replication_method=None):
