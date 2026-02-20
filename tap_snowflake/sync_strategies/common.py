@@ -265,6 +265,30 @@ def cast_column_types(column_types, selected_columns):
             formatted_column_names.append(column_name)
     return formatted_column_names
 
+def download_files_from_s3(stream_name, aws_path, local_path):
+    """Download files from S3"""
+    LOGGER.info(f"Downloading file(s) for {stream_name} to local output directory {local_path}")
+    error_file = os.path.join(local_path, f"{stream_name}_aws_s3_cp_errors.log")
+    s3_cp_command = f"aws s3 cp {aws_path} {local_path} --recursive 1>/dev/null 2>{error_file}"
+    exitcode = os.system(s3_cp_command)
+    
+    try:    
+        if exitcode != 0:
+            if os.path.exists(error_file):
+                with open(error_file, "r") as ef:
+                    error_content = ef.read()
+                raise RuntimeError(f"Failed to download files from S3. aws s3 cp exit code: {exitcode}. Error: {error_content}")
+            else:
+                raise RuntimeError(
+                    f"Failed to download files from S3. aws s3 cp exit code: {exitcode}. "
+                    f"Error output could not be captured (e.g. output directory missing or not writable): {local_path}"
+                )
+        LOGGER.info(f"File downloaded successfully to local output directory")
+    finally:
+        if os.path.exists(error_file):
+            os.remove(error_file)
+            LOGGER.info(f"Error file removed successfully")
+
 def download_data_as_files(cursor, columns, config, catalog_entry, incremental_sql="", replication_key_metadata=None, state=None):
     """Download data as files"""
 
@@ -350,29 +374,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
                                                 'replication_key_value',
                                                 rep_key_value)
 
-            # download the file(s) from s3 to the local output directory
-            LOGGER.info(f"Downloading file(s) for {file_name} to local output directory {local_output_dir}")
-            error_file = os.path.join(local_output_dir, f"{file_name}_aws_s3_cp_errors.log")
-            s3_cp_command = f"aws s3 cp {aws_export_path} {local_output_dir} --recursive 1>/dev/null 2>{error_file}"
-            exitcode = os.system(s3_cp_command)
-            
-            try:    
-                if exitcode != 0:
-                    if os.path.exists(error_file):
-                        with open(error_file, "r") as ef:
-                            error_content = ef.read()
-                        raise RuntimeError(f"Failed to download files from S3. aws s3 cp exit code: {exitcode}. Error: {error_content}")
-                    else:
-                        raise RuntimeError(
-                            f"Failed to download files from S3. aws s3 cp exit code: {exitcode}. "
-                            f"Error output could not be captured (e.g. output directory missing or not writable): {local_output_dir}"
-                        )
-                LOGGER.info(f"File downloaded successfully to local output directory")
-            finally:
-                if os.path.exists(error_file):
-                    os.remove(error_file)
-                    LOGGER.info(f"Error file removed successfully")
-
+            download_files_from_s3(file_name, aws_export_path, local_output_dir)
 
 def sync_query(cursor, catalog_entry, state, select_sql, columns, stream_version, params, replication_method=None):
     """..."""
