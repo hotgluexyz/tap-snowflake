@@ -305,73 +305,73 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
     with cursor.connect_with_backoff() as open_conn:
         with open_conn.cursor() as cur:
 
-            # if replication_key_metadata is not None:
-            #     cur.execute(f"SELECT MAX(\"{replication_key_metadata}\") FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}")
-            #     max_replication_key_value = cur.fetchone()[0]
+            if replication_key_metadata is not None:
+                cur.execute(f"SELECT MAX(\"{replication_key_metadata}\") FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}")
+                max_replication_key_value = cur.fetchone()[0]
 
-            # column_types = get_column_names(cur, config, catalog_entry.table)
-            # formatted_column_names = []
+            column_types = get_column_names(cur, config, catalog_entry.table)
+            formatted_column_names = []
 
-            # LOGGER.info(f"Downloading file {file_name} to S3 {aws_export_path}")
+            LOGGER.info(f"Downloading file {file_name} to S3 {aws_export_path}")
             
-            # formatted_column_names = cast_column_types(column_types, columns)
+            formatted_column_names = cast_column_types(column_types, columns)
 
-            # query_structure = f"""
-            # FROM (
-            #     SELECT 
-            #         {', '.join(formatted_column_names)}
-            #     FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
-            #     {incremental_sql}
-            # )
-            # FILE_FORMAT = (TYPE = PARQUET COMPRESSION = SNAPPY)
-            # CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}' AWS_TOKEN='{aws_session}')
-            # OVERWRITE = TRUE
-            # HEADER = TRUE
-            # MAX_FILE_SIZE = {max_file_size}
-            # """ 
-            # try:
-            #     query = f"""
-            #     COPY INTO '{aws_export_path}/{file_name}.parquet'
-            #     {query_structure}
-            #     SINGLE = TRUE
-            #     """
-            #     cur.execute(query)
-            # except ProgrammingError as e:
-            #     if "Max file size" in str(e) and "exceeded for unload single file mode." in str(e):
-            #         # Fallback to multiple file mode
-            #         query = f"""
-            #         COPY INTO '{aws_export_path}/{file_name}'
-            #         {query_structure}
-            #         SINGLE = FALSE
-            #         """
-            #         cur.execute(query)
-            #     else:
-            #         raise e from e
+            query_structure = f"""
+            FROM (
+                SELECT 
+                    {', '.join(formatted_column_names)}
+                FROM {config['dbname']}.{config['schema']}.{catalog_entry.table}
+                {incremental_sql}
+            )
+            FILE_FORMAT = (TYPE = PARQUET COMPRESSION = SNAPPY)
+            CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}' AWS_TOKEN='{aws_session}')
+            OVERWRITE = TRUE
+            HEADER = TRUE
+            MAX_FILE_SIZE = {max_file_size}
+            """ 
+            try:
+                query = f"""
+                COPY INTO '{aws_export_path}/{file_name}.parquet'
+                {query_structure}
+                SINGLE = TRUE
+                """
+                cur.execute(query)
+            except ProgrammingError as e:
+                if "Max file size" in str(e) and "exceeded for unload single file mode." in str(e):
+                    # Fallback to multiple file mode
+                    query = f"""
+                    COPY INTO '{aws_export_path}/{file_name}'
+                    {query_structure}
+                    SINGLE = FALSE
+                    """
+                    cur.execute(query)
+                else:
+                    raise e from e
             
-            # LOGGER.info(f"File downloaded successfully to S3")
+            LOGGER.info(f"File downloaded successfully to S3")
     
-            # # get rows len to add to the job metrics
-            # LOGGER.info(f"Getting job metrics for {file_name}")
-            # count_query = f"""
-            # SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table} {incremental_sql}
-            # """
-            # cur.execute(count_query)
-            # rowcount = cur._total_rowcount
-            # update_job_metrics(file_name, rowcount, local_output_dir)
+            # get rows len to add to the job metrics
+            LOGGER.info(f"Getting job metrics for {file_name}")
+            count_query = f"""
+            SELECT *, COUNT(*) OVER() as rowcount FROM {config['dbname']}.{config['schema']}.{catalog_entry.table} {incremental_sql}
+            """
+            cur.execute(count_query)
+            rowcount = cur._total_rowcount
+            update_job_metrics(file_name, rowcount, local_output_dir)
 
-            # if replication_key_metadata is not None:
-            #     state = singer.write_bookmark(state,
-            #                                     catalog_entry.tap_stream_id,
-            #                                     'replication_key',
-            #                                     replication_key_metadata)
+            if replication_key_metadata is not None:
+                state = singer.write_bookmark(state,
+                                                catalog_entry.tap_stream_id,
+                                                'replication_key',
+                                                replication_key_metadata)
 
-            #     rep_key_value = clean_rep_key_value(format_datetime_to_iso_tuple(max_replication_key_value)[0]) if max_replication_key_value is not None else None
+                rep_key_value = clean_rep_key_value(format_datetime_to_iso_tuple(max_replication_key_value)[0]) if max_replication_key_value is not None else None
 
 
-            #     state = singer.write_bookmark(state,
-            #                                     catalog_entry.tap_stream_id,
-            #                                     'replication_key_value',
-            #                                     rep_key_value)
+                state = singer.write_bookmark(state,
+                                                catalog_entry.tap_stream_id,
+                                                'replication_key_value',
+                                                rep_key_value)
 
             download_files_from_s3(file_name, aws_export_path, local_output_dir)
 
