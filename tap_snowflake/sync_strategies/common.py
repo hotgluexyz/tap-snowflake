@@ -353,7 +353,6 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
             # download the file(s) from s3 to the local output directory
             LOGGER.info(f"Downloading file(s) for {file_name} to local output directory {local_output_dir}")
             error_file = os.path.join(local_output_dir, f"{file_name}_aws_s3_cp_errors.log")
-            # TESTING: use invalid source to force failure and verify error file + RuntimeError (revert before commit)
             s3_cp_command = f"aws s3 cp {aws_export_path} {local_output_dir} --recursive 1>/dev/null 2>{error_file}"
             exitcode = os.system(s3_cp_command)
             
