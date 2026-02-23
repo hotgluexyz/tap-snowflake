@@ -15,7 +15,13 @@ import os
 import json
 import pathlib
 from snowflake.connector import ProgrammingError
+import backoff
+import requests
 LOGGER = singer.get_logger('tap_snowflake')
+
+class ExpiredCredentialsError(Exception):
+    """Exception to raise when credentials are expired"""
+    pass
 
 def escape(string):
     """Escape strings to be SQL safe"""
@@ -288,12 +294,53 @@ def download_files_from_s3(stream_name, aws_path, local_path):
             os.remove(error_file)
             LOGGER.info(f"Error file removed successfully")
 
+def refresh_s3_credentials():
+    """Refresh S3 credentials"""
+    env = os.environ.get('ENV_ID')
+    tenant = os.environ.get('TENANT')
+    api_key = os.environ.get('API_KEY')
+    api_url = f"{os.environ.get('API_URL')}/credentials/job-execute/{env}"
+    endpoint = f"{api_url}?tenant={tenant}"
+
+    # Make request to client api to gen new STS tokens
+    r = requests.get(endpoint, headers={
+        'x-api-key': api_key
+    })
+
+    # Check if response is not ok
+    if r.status_code != 200:
+        raise Exception(f"Failed to generate credentials: status {r.status_code} - {r.text}")
+
+    # Parse response as JSON
+    tokens = r.json()
+    aws_key = tokens['accessKeyId']
+    aws_secret_key = tokens['secretAccessKey']
+    aws_session = tokens['sessionToken']
+    return aws_key, aws_secret_key, aws_session
+
+@backoff.on_exception(backoff.expo, ExpiredCredentialsError, max_time=60, max_tries=3)
+def execute_query(cursor, query):
+    """Execute a query"""
+    try:
+        # replace __aws_key__ with the actual aws key
+        query = query.replace("__aws_key__", os.environ.get("AWS_ACCESS_KEY_ID", ""))
+        query = query.replace("__aws_secret_key__", os.environ.get("AWS_SECRET_ACCESS_KEY", ""))
+        query = query.replace("__aws_session__", os.environ.get("AWS_SESSION_TOKEN", ""))
+        cursor.execute(query)
+    except Exception as e:
+        if "token expired" in str(e):
+            # After refreshing credentials, set them in environment so the new values are used on retry.
+            aws_key, aws_secret_key, aws_session = refresh_s3_credentials()
+            os.environ["AWS_ACCESS_KEY_ID"] = aws_key
+            os.environ["AWS_SECRET_ACCESS_KEY"] = aws_secret_key
+            os.environ["AWS_SESSION_TOKEN"] = aws_session
+            # raise error and retry
+            raise ExpiredCredentialsError(f"Expired credentials: {e}")
+        raise e
+
 def download_data_as_files(cursor, columns, config, catalog_entry, incremental_sql="", replication_key_metadata=None, state=None):
     """Download data as files"""
 
-    aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
-    aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
-    aws_session = os.environ.get("AWS_SESSION_TOKEN")
     aws_bucket = os.environ.get("ENV_ID")
     job_root = os.environ.get("JOB_ROOT")
     job_id = os.environ.get("JOB_ID", "")
@@ -324,7 +371,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
                 {incremental_sql}
             )
             FILE_FORMAT = (TYPE = PARQUET COMPRESSION = SNAPPY)
-            CREDENTIALS = (AWS_KEY_ID='{aws_key}' AWS_SECRET_KEY='{aws_secret_key}' AWS_TOKEN='{aws_session}')
+            CREDENTIALS = (AWS_KEY_ID='__aws_key__' AWS_SECRET_KEY='__aws_secret_key__' AWS_TOKEN='__aws_session__')
             OVERWRITE = TRUE
             HEADER = TRUE
             MAX_FILE_SIZE = {max_file_size}
@@ -335,7 +382,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
                 {query_structure}
                 SINGLE = TRUE
                 """
-                cur.execute(query)
+                execute_query(cur, query)
             except ProgrammingError as e:
                 if "Max file size" in str(e) and "exceeded for unload single file mode." in str(e):
                     # Fallback to multiple file mode
@@ -344,7 +391,7 @@ def download_data_as_files(cursor, columns, config, catalog_entry, incremental_s
                     {query_structure}
                     SINGLE = FALSE
                     """
-                    cur.execute(query)
+                    execute_query(cur, query)
                 else:
                     raise e from e
             
