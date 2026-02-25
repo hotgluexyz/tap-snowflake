@@ -81,14 +81,14 @@ def sync_table(snowflake_conn, catalog_entry, state, columns, config={}):
                     replication_key_value = pendulum.parse(replication_key_value)
 
                     # For datetime, use quotes in SQL
-                    incremental_sql += ' WHERE "{}" > \'{}\' ORDER BY "{}" ASC'.format(
+                    incremental_sql += ' WHERE "{}" >= \'{}\' ORDER BY "{}" ASC'.format(
                         replication_key_metadata,
                         replication_key_value,
                         replication_key_metadata)
                 else:
                     # Handle integer/numeric replication keys (like BIGINT)
                     # For numeric values, don't use quotes in SQL
-                    incremental_sql += ' WHERE "{}" > {} ORDER BY "{}" ASC'.format(
+                    incremental_sql += ' WHERE "{}" >= {} ORDER BY "{}" ASC'.format(
                         replication_key_metadata,
                         replication_key_value,
                         replication_key_metadata)
