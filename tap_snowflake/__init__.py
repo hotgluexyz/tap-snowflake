@@ -260,12 +260,14 @@ def discover_catalog(snowflake_conn, config):
                 replication_key = table_config_data.get("replication_key")
                 if replication_key:
                     replication_method = "INCREMENTAL"
+                    metadata.write(md_map, (), 'valid-replication-keys', [replication_key])
                 key_properties = table_config_data.get("primary_key")
                 if key_properties and isinstance(key_properties, str):
                     key_properties = [key_properties]
             else:
                 LOGGER.info(f"No config data found for table {table_name}, primary key and replication key not set.")
 
+            metadata.write(md_map, (), 'replication-method', replication_method)
             entry = CatalogEntry(
                 table=table_name,
                 stream=table_name,
@@ -498,7 +500,7 @@ def sync_streams(snowflake_conn, catalog, state, config={}):
 
         md_map = metadata.to_map(catalog_entry.metadata)
 
-        replication_method = snowflake_conn.connection_config.get("replication_method") or md_map.get((), {}).get('replication-method', "")
+        replication_method = md_map.get((), {}).get('replication-method', "")
 
         database_name = common.get_database_name(catalog_entry, snowflake_conn)
         schema_name = common.get_schema_name(catalog_entry, snowflake_conn)
