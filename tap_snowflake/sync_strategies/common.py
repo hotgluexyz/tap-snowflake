@@ -271,6 +271,8 @@ def cast_column_types(column_types, selected_columns):
             formatted_column_names.append(column_name)
     return formatted_column_names
 
+
+@backoff.on_exception(backoff.expo, ExpiredCredentialsError, max_time=60, max_tries=3)
 def download_files_from_s3(stream_name, aws_path, local_path):
     LOGGER.info(f"Downloading file(s) for {stream_name} to local output directory {local_path}")
     error_file = os.path.join(local_path, f"{stream_name}_aws_s3_cp_errors.log")
@@ -282,6 +284,10 @@ def download_files_from_s3(stream_name, aws_path, local_path):
             if os.path.exists(error_file):
                 with open(error_file, "r") as ef:
                     error_content = ef.read()
+                
+                if "ExpiredToken" in error_content:
+                    refresh_s3_credentials()
+                    raise ExpiredCredentialsError(f"Failed to download files from S3. aws s3 cp exit code: {exitcode}. Expired credentials: {error_content}")
                 raise RuntimeError(f"Failed to download files from S3. aws s3 cp exit code: {exitcode}. Error: {error_content}")
             else:
                 raise RuntimeError(
