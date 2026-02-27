@@ -322,7 +322,11 @@ def refresh_s3_credentials():
     aws_key = tokens['accessKeyId']
     aws_secret_key = tokens['secretAccessKey']
     aws_session = tokens['sessionToken']
-    return aws_key, aws_secret_key, aws_session
+
+    # save them to the environment
+    os.environ["AWS_ACCESS_KEY_ID"] = aws_key
+    os.environ["AWS_SECRET_ACCESS_KEY"] = aws_secret_key
+    os.environ["AWS_SESSION_TOKEN"] = aws_session
 
 @backoff.on_exception(backoff.expo, ExpiredCredentialsError, max_time=60, max_tries=3)
 def execute_query(cursor, query):
@@ -336,10 +340,7 @@ def execute_query(cursor, query):
     except Exception as e:
         if "token expired" in str(e):
             # After refreshing credentials, set them in environment so the new values are used on retry.
-            aws_key, aws_secret_key, aws_session = refresh_s3_credentials()
-            os.environ["AWS_ACCESS_KEY_ID"] = aws_key
-            os.environ["AWS_SECRET_ACCESS_KEY"] = aws_secret_key
-            os.environ["AWS_SESSION_TOKEN"] = aws_session
+            refresh_s3_credentials()
             # raise error and retry
             raise ExpiredCredentialsError(f"Expired credentials: {e}")
         raise e
