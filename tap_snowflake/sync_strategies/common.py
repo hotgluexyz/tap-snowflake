@@ -271,6 +271,8 @@ def cast_column_types(column_types, selected_columns):
             formatted_column_names.append(column_name)
     return formatted_column_names
 
+
+@backoff.on_exception(backoff.expo, ExpiredCredentialsError, max_time=60, max_tries=3)
 def download_files_from_s3(stream_name, aws_path, local_path):
     LOGGER.info(f"Downloading file(s) for {stream_name} to local output directory {local_path}")
     error_file = os.path.join(local_path, f"{stream_name}_aws_s3_cp_errors.log")
@@ -282,6 +284,10 @@ def download_files_from_s3(stream_name, aws_path, local_path):
             if os.path.exists(error_file):
                 with open(error_file, "r") as ef:
                     error_content = ef.read()
+                
+                if "ExpiredToken" in error_content:
+                    refresh_s3_credentials()
+                    raise ExpiredCredentialsError(f"Failed to download files from S3. aws s3 cp exit code: {exitcode}. Expired credentials: {error_content}")
                 raise RuntimeError(f"Failed to download files from S3. aws s3 cp exit code: {exitcode}. Error: {error_content}")
             else:
                 raise RuntimeError(
@@ -316,7 +322,11 @@ def refresh_s3_credentials():
     aws_key = tokens['accessKeyId']
     aws_secret_key = tokens['secretAccessKey']
     aws_session = tokens['sessionToken']
-    return aws_key, aws_secret_key, aws_session
+
+    # save them to the environment
+    os.environ["AWS_ACCESS_KEY_ID"] = aws_key
+    os.environ["AWS_SECRET_ACCESS_KEY"] = aws_secret_key
+    os.environ["AWS_SESSION_TOKEN"] = aws_session
 
 @backoff.on_exception(backoff.expo, ExpiredCredentialsError, max_time=60, max_tries=3)
 def execute_query(cursor, query):
@@ -330,10 +340,7 @@ def execute_query(cursor, query):
     except Exception as e:
         if "token expired" in str(e):
             # After refreshing credentials, set them in environment so the new values are used on retry.
-            aws_key, aws_secret_key, aws_session = refresh_s3_credentials()
-            os.environ["AWS_ACCESS_KEY_ID"] = aws_key
-            os.environ["AWS_SECRET_ACCESS_KEY"] = aws_secret_key
-            os.environ["AWS_SESSION_TOKEN"] = aws_session
+            refresh_s3_credentials()
             # raise error and retry
             raise ExpiredCredentialsError(f"Expired credentials: {e}")
         raise e
