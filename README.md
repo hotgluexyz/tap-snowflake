@@ -30,11 +30,31 @@ make venv
 
 1. Create a `config.json` file with connection details to snowflake, here is a [sample config file](./config_sample.json).
 
-**Note**: `tables` is a mandatory parameter as well to avoid a long-running catalog discovery process.
-Please specify fully qualified table and view names and only that ones that you need to extract otherwise you can
-end up with very long running discovery mode of this tap. Discovery mode is analysing table structures but
-Snowflake doesn't like selecting lot of rows from `INFORMATION_SCHEMA` or running `SHOW` commands that returns lot of
-rows. Please be as specific as possible.
+There are two supported formats for specifying which tables to sync:
+
+**Option A — `tables`**
+
+A comma-separated list of fully qualified table names: `database.schema.table`. Primary keys and replication keys must be configured in the catalog (`properties.json`) instead.
+
+```json
+{
+  "tables": "MYDB.MYSCHEMA.ORDERS,MYDB.MYSCHEMA.CUSTOMERS"
+}
+```
+
+**Option B — `table_selection`**
+
+A list of table objects. Requires an additional top-level `schema` field. Allows specifying primary keys and replication keys directly in the config, which takes precedence over the catalog.
+
+```json
+{
+  "schema": "MYSCHEMA",
+  "table_selection": [
+    { "name": "ORDERS" },
+    { "name": "CUSTOMERS", "primary_key": "ID", "replication_key": "UPDATED_AT" }
+  ]
+}
+```
 
 2. Run it in discovery mode to generate a `properties.json`
 
