@@ -5,18 +5,29 @@ import requests
 from hotglue_singer_sdk.authenticators import OAuthAuthenticator
 
 
-def fetch_snowflake_access_token(config: dict) -> str:
-    """Exchange a Snowflake refresh token for a new access token."""
-    account = config.get("account")
-    client_id = config.get("client_id")
-    client_secret = config.get("client_secret")
-    url = f"https://{account}.snowflakecomputing.com/oauth/token-request"
-    payload = {
-        "client_id": client_id,
+def _snowflake_token_url(account: str) -> str:
+    return f"https://{account}.snowflakecomputing.com/oauth/token-request"
+
+
+def _snowflake_oauth_payload(config: dict) -> dict:
+    return {
+        "client_id": config.get("client_id"),
         "refresh_token": config.get("refresh_token"),
         "grant_type": "refresh_token",
     }
-    response = requests.post(url, data=payload, auth=requests.auth.HTTPBasicAuth(client_id, client_secret))
+
+
+def _snowflake_oauth_auth(config: dict) -> requests.auth.HTTPBasicAuth:
+    return requests.auth.HTTPBasicAuth(config.get("client_id"), config.get("client_secret"))
+
+
+def fetch_snowflake_access_token(config: dict) -> str:
+    """Exchange a Snowflake refresh token for a new access token."""
+    response = requests.post(
+        _snowflake_token_url(config.get("account")),
+        data=_snowflake_oauth_payload(config),
+        auth=_snowflake_oauth_auth(config),
+    )
     response_json = response.json()
     if response_json.get("error"):
         raise ConnectionError(response_json.get("message"))
@@ -28,19 +39,11 @@ class SnowflakeOAuthAuthenticator(OAuthAuthenticator):
 
     @property
     def auth_endpoint(self) -> str:
-        account = self.config.get("account")
-        return f"https://{account}.snowflakecomputing.com/oauth/token-request"
+        return _snowflake_token_url(self.config.get("account"))
 
     @property
     def oauth_request_payload(self) -> dict:
-        return {
-            "client_id": self.config.get("client_id"),
-            "refresh_token": self.config.get("refresh_token"),
-            "grant_type": "refresh_token",
-        }
+        return _snowflake_oauth_payload(self.config)
 
     def request_auth(self):
-        return requests.auth.HTTPBasicAuth(
-            self.config.get("client_id"),
-            self.config.get("client_secret"),
-        )
+        return _snowflake_oauth_auth(self.config)
