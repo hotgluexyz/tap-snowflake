@@ -4,22 +4,20 @@
 import collections
 import copy
 import itertools
-import re
-import sys
+import json
 import logging
 
 import singer
 import singer.metrics as metrics
-import singer.schema
-import snowflake.connector
 from singer import metadata
-from singer import utils
 from singer.catalog import Catalog, CatalogEntry
 from singer.schema import Schema
+from hotglue_singer_sdk import Tap, typing as th
 
 import tap_snowflake.sync_strategies.common as common
 import tap_snowflake.sync_strategies.full_table as full_table
 import tap_snowflake.sync_strategies.incremental as incremental
+from tap_snowflake.auth import SnowflakeOAuthAuthenticator
 from tap_snowflake.connection import SnowflakeConnection
 
 LOGGER = singer.get_logger('tap_snowflake')
@@ -525,30 +523,58 @@ def do_sync(snowflake_conn, config, catalog, state):
     sync_streams(snowflake_conn, catalog, state, config)
 
 
-def main_impl():
-    args = utils.parse_args(REQUIRED_CONFIG_KEYS)
+class TapSnowflake(Tap):
+    """Singer tap for Snowflake."""
 
-    snowflake_conn = SnowflakeConnection(args.config)
+    name = "tap-snowflake"
 
-    if args.discover:
-        do_discover(snowflake_conn, args.config)
-    elif args.catalog:
-        state = args.state or {}
-        do_sync(snowflake_conn, args.config, args.catalog, state)
-    elif args.properties:
-        catalog = Catalog.from_dict(args.properties)
-        state = args.state or {}
-        do_sync(snowflake_conn, args.config, catalog, state)
-    else:
-        LOGGER.info('No properties were selected')
+    config_jsonschema = th.PropertiesList(
+        th.Property("account", th.StringType, required=True),
+        th.Property("dbname", th.StringType, required=True),
+        th.Property("warehouse", th.StringType, required=True),
+        th.Property("user", th.StringType),
+        th.Property("password", th.StringType),
+        th.Property("private_key", th.StringType),
+        th.Property("private_key_password", th.StringType),
+        th.Property("access_token", th.StringType),
+        th.Property("refresh_token", th.StringType),
+        th.Property("client_id", th.StringType),
+        th.Property("client_secret", th.StringType),
+        th.Property("role", th.StringType),
+        th.Property("schema", th.StringType),
+        th.Property("tables", th.StringType),
+        th.Property("table_selection", th.ArrayType(th.ObjectType())),
+        th.Property("start_date", th.StringType),
+        th.Property("insecure_mode", th.BooleanType),
+        th.Property("client_session_keep_alive", th.BooleanType),
+        th.Property("download_data_as_files", th.BooleanType),
+    ).to_dict()
+
+    @classmethod
+    def access_token_support(cls, connector=None):
+        return (SnowflakeOAuthAuthenticator, None)
+
+    def discover_streams(self):
+        return []
+
+    def run_discovery(self):
+        snowflake_conn = SnowflakeConnection(dict(self.config))
+        do_discover(snowflake_conn, dict(self.config))
+
+    def run_sync(self, catalog=None, state=None):
+        snowflake_conn = SnowflakeConnection(dict(self.config))
+        singer_catalog = Catalog.load(catalog) if catalog else None
+        if state:
+            with open(state) as f:
+                singer_state = json.load(f)
+        else:
+            singer_state = {}
+        do_sync(snowflake_conn, dict(self.config), singer_catalog, singer_state)
 
 
 def main():
-    try:
-        main_impl()
-    except Exception as exc:
-        LOGGER.critical(exc)
-        raise exc
+    TapSnowflake.cli()
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     main()

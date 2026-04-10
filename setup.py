@@ -18,15 +18,10 @@ setup(name='pipelinewise-tap-snowflake',
       ],
       py_modules=['tap_snowflake'],
       install_requires=[
-            'certifi==2022.9.24',
-            'cryptography==38.0.4; python_version == "3.7"',
-            'pyOpenSSL==22.1.0',
-            'pipelinewise-singer-python==1.*',
-            'requests==2.22.0',
+            'hotglue-singer-sdk~=1.0.26',
             'snowflake-connector-python==2.0.2; python_version == "3.7"',
             'snowflake-connector-python~=3.4.0; python_version == "3.10"',
             'azure-storage-blob<2.0.0; python_version == "3.7"',
-            'pendulum==1.2.0'
       ],
       extras_require={
           'test': [

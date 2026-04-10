@@ -78,6 +78,24 @@ Populate `user` and `password` in the `config.json` file
 
 To use key pair authentication, omit the `password` and instead provide the `private_key_path` to the unencrypted version of the private key and, optionally, the `private_key_passphrase`.
 
+#### OAuth authentication
+
+To use OAuth, omit `user` and `password` and provide the following fields:
+
+```json
+{
+  "account": "<account-identifier>",
+  "dbname": "<database>",
+  "warehouse": "<warehouse>",
+  "role": "<role>",
+  "client_id": "<oauth-client-id>",
+  "client_secret": "<oauth-client-secret>",
+  "refresh_token": "<refresh-token>",
+  "access_token": "<access-token>"
+}
+```
+
+The tap automatically refreshes the `access_token` using the `refresh_token` when it expires.
 
 ### Discovery mode
 
