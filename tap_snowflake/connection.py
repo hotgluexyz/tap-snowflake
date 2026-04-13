@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from typing import Union, List, Dict
 
-import requests
 import backoff
 import singer
 import sys
@@ -15,6 +14,7 @@ from snowflake.connector.errorcode import ER_INVALID_PRIVATE_KEY
 from snowflake.connector.errors import ProgrammingError
 from datetime import datetime
 from cryptography.hazmat.primitives.serialization import load_der_private_key
+from tap_snowflake.auth import fetch_snowflake_access_token
 
 python_version = sys.version_info
 if python_version.major == 3 and python_version.minor < 10:
@@ -176,19 +176,7 @@ class SnowflakeConnection:
         )
     
     def refresh_token(self):
-        """Connect to snowflake database"""
-        payload = {
-            "client_id": f'{self.connection_config["client_id"]}',
-            "refresh_token": self.connection_config["refresh_token"],
-            "grant_type": "refresh_token",
-        }
-        url = f"https://{self.connection_config['account']}.snowflakecomputing.com/oauth/token-request"
-        auth = requests.auth.HTTPBasicAuth(self.connection_config["client_id"], self.connection_config["client_secret"])
-        token_response = requests.post(url, data=payload, auth=auth)
-        token_response = token_response.json()
-        if token_response.get("error"):
-            raise ConnectionError(token_response["message"])
-        self.connection_config['access_token'] = token_response.get('access_token')
+        self.connection_config['access_token'] = fetch_snowflake_access_token(self.connection_config)
 
     def get_conn_creds(self):
         return dict(
